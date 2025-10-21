@@ -18,6 +18,12 @@ if (-not (Test-Path -LiteralPath $SierraDataDir)) {
 
 $destination = Join-Path -Path $SierraDataDir -ChildPath $TargetName
 
-Write-Host "[hot-swap] Copying '$Dll' -> '$destination'"
-Copy-Item -LiteralPath $Dll -Destination $destination -Force
-Write-Host "[hot-swap] Updated: $destination"
+Write-Host "[hot-swap] Preparing to copy '$Dll' -> '$destination'"
+
+try {
+  Copy-Item -LiteralPath $Dll -Destination $destination -Force
+  Write-Host "[hot-swap] Updated: $destination"
+} catch {
+  Write-Warning "Copy failed. In Sierra Chart execute 'Analysis → Build → Release All DLLs and Deny Load' and retry."
+  throw
+}
