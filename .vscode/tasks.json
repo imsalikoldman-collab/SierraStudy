@@ -1,0 +1,46 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "msbuild",
+      "args": [
+        "${workspaceFolder}/SierraStudy.sln",
+        "/m",
+        "/p:Configuration=${input:cfg}",
+        "/p:Platform=x64"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    },
+    {
+      "label": "Test",
+      "type": "shell",
+      "command": "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Tests.exe",
+      "group": "test"
+    },
+    {
+      "label": "Hot-Swap",
+      "type": "shell",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/HotSwap.ps1",
+        "-Dll",
+        "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Wrapper.dll",
+        "-SierraDataDir",
+        "${env:SIERRA_DATA_DIR}"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "cfg",
+      "type": "pickString",
+      "options": ["Debug", "Release"],
+      "default": "Debug"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+# Visual Studio cache
+.vs/
+ipch/
+*.opensdf
+*.sdf
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+*.VC.VC.opendb
+*.cache
+*.obj
+*.iobj
+*.ipdb
+*.idb
+*.pdb
+*.ilk
+*.log
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+*.opendb
+*.rsp
+
+# Build output
+out/
+x64/
+Debug/
+Release/
+Logs/
+**/build/
+
+# Binaries
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Misc
+*.pch
+*.tmp
+*.swp
+*.psess
+*.vsp
+*.vspx
+*.ncb
+.DS_Store
+
+# User-specific project settings
+*.vcxproj.user
+
+# External assets (keep documentation)
+/external/*
+!/external/README.md
+
+# Third-party helper build trees (keep sources if added)
+/third_party/**/build/
+/third_party/**/out/
+/third_party/**/cmake-build*/
+/third_party/**/Debug/
+/third_party/**/Release/
