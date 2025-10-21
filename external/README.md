@@ -1,13 +1,13 @@
-# External Dependencies
+# Внешние зависимости
 
-This directory is intentionally empty and excluded from source control. Use it to store local-only artifacts such as:
-- Sierra Chart SDK archives.
-- Custom tools required for development.
+Каталог предназначен для локальных артефактов, которые не должны попадать в Git:
+- Архивы или распакованные файлы SDK Sierra Chart.
+- Частные инструменты и утилиты, необходимые для разработки.
 
-Ensure the `SIERRA_SDK_DIR` environment variable points to the ACSIL headers contained in your Sierra Chart installation, typically:
+Установите переменную окружения `SIERRA_SDK_DIR`, указывающую на папку с заголовками ACSIL в вашей установке Sierra Chart, например:
 
 ```
 C:\SierraChart\ACS_Source
 ```
 
-Do not commit proprietary SDK files to the repository.
+Проприетарные файлы SDK не коммитьте в репозиторий.

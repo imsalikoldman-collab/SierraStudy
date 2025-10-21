@@ -221,3 +221,4 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 ## 11) Ежедневный цикл (коротко)
 1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **Commit/Push**.  
 Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`.
+
