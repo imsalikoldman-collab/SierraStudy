@@ -6,7 +6,7 @@
 
 ## 1) Архитектура solution
 **Одна `.sln` и три проекта:**
-- **Core** — *Static Library (.lib)*. Чистая бизнес‑логика. **Без** `SierraChart.h` и любых ACSIL‑типов.
+- **Core** — *Static Library (.lib)*. Чистая бизнес-логика. **Без** `SierraChart.h` и любых ACSIL-типов.
 - **Wrapper** — *Dynamic Library (.dll)*. Обёртка ACSIL: читает входы/создаёт Subgraphs, вызывает Core, пишет результат в `sc.Subgraph`. Инициализирует логирование `plog` (если нужно).
 - **Tests** — *Console (exe)* на **Google Test**, линкуется **только** с `Core.lib`. Тесты актуализируем совместно с кодом.
 
@@ -221,4 +221,3 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 ## 11) Ежедневный цикл (коротко)
 1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **Commit/Push**.  
 Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`.
-
