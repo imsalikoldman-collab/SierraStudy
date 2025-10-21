@@ -2,6 +2,9 @@ param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Debug',
 
+  [ValidateSet('Debug', 'Release')]
+  [string]$HotSwapConfiguration = 'Release',
+
   [switch]$SkipTests,
 
   [switch]$NoHotSwap,
@@ -19,11 +22,18 @@ if (-not (Test-Path -LiteralPath $invokeBuild)) {
   throw "Invoke-Build script not found: $invokeBuild"
 }
 
+# Build configuration for tests first.
 & $invokeBuild -Solution $solution -Configuration $Configuration -Platform $Platform
 
-$outputDir = Join-Path $PSScriptRoot "..\out\$Platform\$Configuration"
-$testExe = Join-Path $outputDir 'SierraStudy.Tests.exe'
-$wrapperDll = Join-Path $outputDir 'SierraStudy.Wrapper.dll'
+# If hot swap configuration differs, ensure release binaries are built as well.
+if (-not $NoHotSwap -and $HotSwapConfiguration -ne $Configuration) {
+  & $invokeBuild -Solution $solution -Configuration $HotSwapConfiguration -Platform $Platform
+}
+
+$testOutputDir = Join-Path $PSScriptRoot "..\out\$Platform\$Configuration"
+$testExe = Join-Path $testOutputDir 'SierraStudy.Tests.exe'
+$hotSwapDir = Join-Path $PSScriptRoot "..\out\$Platform\$HotSwapConfiguration"
+$wrapperDll = Join-Path $hotSwapDir 'SierraStudy.dll'
 
 if (-not $SkipTests) {
   $invokeTests = Join-Path $PSScriptRoot 'Invoke-Tests.ps1'
