@@ -15,9 +15,9 @@ void LogDllStartup(SCStudyInterfaceRef sc) {
     return;
   }
 
-  sc.AddMessageToLog("", 0);
-  sc.AddMessageToLog("-------------", 0);
-  sc.AddMessageToLog("SierraStudy DLL loaded", 0);
+  sc.AddMessageToLog("                                      ", 0);
+  sc.AddMessageToLog("--------------------------------------", 0);
+  sc.AddMessageToLog("        SierraStudy DLL loaded", 0);
   logged = true;
 }
 
