@@ -1,3 +1,23 @@
+<#
+@brief Полный цикл сборки, тестирования и (опционально) горячей замены DLL.
+@param Configuration Конфигурация сборки для тестов.
+@param HotSwapConfiguration Конфигурация, из которой берём DLL для горячей замены (обычно Release).
+@param SkipTests Пропустить запуск юнит-тестов.
+@param NoHotSwap Пропустить копирование DLL.
+@param Platform Целевая платформа (x64).
+@param TestFilter Фильтр Google Test (опционально).
+@param RemoteHotSwap Включить удалённый режим (послать UDP-команды RELEASE/ALLOW).
+@param DisableRemoteFallback Отключить автоматический переход в удалённый режим при блокировке файла.
+@param SierraHost Хост Sierra Chart для удалённых команд.
+@param SierraPort Порт UDP Sierra Chart.
+@param ReleaseCommandFormat Формат строки команды для освобождения DLL.
+@param AllowCommandFormat Формат строки команды для разрешения загрузки DLL.
+@param WaitTimeoutSeconds Таймаут ожидания освобождения файла.
+@param WaitIntervalMilliseconds Интервал проверки освобождения.
+@return Ничего. При ошибках сборки/тестов/копирования будет выброшено исключение.
+@note Скрипт вызывает вспомогательные Invoke-Build, Invoke-Tests и HotSwap. По умолчанию при блокировке файла активируется удалённый сценарий Release/Allow (отключается ключом -DisableRemoteFallback).
+@warning Убедитесь, что переменная окружения SIERRA_DATA_DIR установлена перед запуском горячей замены.
+#>
 param(
   [ValidateSet('Debug', 'Release')]
   [string]$Configuration = 'Debug',
@@ -11,7 +31,23 @@ param(
 
   [string]$Platform = 'x64',
 
-  [string]$TestFilter
+  [string]$TestFilter,
+
+  [switch]$RemoteHotSwap,
+
+  [switch]$DisableRemoteFallback,
+
+  [string]$SierraHost = "127.0.0.1",
+
+  [int]$SierraPort = 11099,
+
+  [string]$ReleaseCommandFormat = "RELEASE_DLL--{0}",
+
+  [string]$AllowCommandFormat = "ALLOW_LOAD_DLL--{0}",
+
+  [int]$WaitTimeoutSeconds = 20,
+
+  [int]$WaitIntervalMilliseconds = 250
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,10 +94,21 @@ if (-not $NoHotSwap) {
   }
 
   if ($env:SIERRA_DATA_DIR) {
-    & pwsh -NoProfile -File $hotSwapScript -Dll $wrapperDll -SierraDataDir $env:SIERRA_DATA_DIR
+    & pwsh -NoProfile -File $hotSwapScript `
+      -Dll $wrapperDll `
+      -SierraDataDir $env:SIERRA_DATA_DIR `
+      -UseRemoteRelease:$RemoteHotSwap `
+      -AutoRemoteFallback:(!$DisableRemoteFallback) `
+      -SierraHost $SierraHost `
+      -SierraPort $SierraPort `
+      -ReleaseCommandFormat $ReleaseCommandFormat `
+      -AllowCommandFormat $AllowCommandFormat `
+      -WaitTimeoutSeconds $WaitTimeoutSeconds `
+      -WaitIntervalMilliseconds $WaitIntervalMilliseconds
   } else {
     Write-Warning 'SIERRA_DATA_DIR is not set. Skipping hot-swap step.'
   }
 } else {
   Write-Warning 'Hot-swap disabled by -NoHotSwap.'
 }
+

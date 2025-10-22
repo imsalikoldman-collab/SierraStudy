@@ -1,4 +1,5 @@
 #include "sierra/acsil/study.hpp"
+#include "sierra/acsil/startup.hpp"
 
 #include "sierra/core/moving_average.hpp"
 
@@ -16,19 +17,19 @@
 #define SIERRA_STUDY_HAS_PLOG 0
 #endif
 
-// Group name displayed in Sierra Chart "Add Custom Study" dialog.
+/// \brief Название группы, отображаемое в диалоге Sierra Chart «Add Custom Study».
 SCDLLName("SierraStudy Custom Studies")
 
 namespace {
 
-constexpr int kPersistState = 0;
 constexpr int kPersistLogging = 1;
 
-struct StudyState {
-  std::vector<double> closeBuffer;
-};
-
 #if SIERRA_STUDY_HAS_PLOG
+/// @brief Однократно настраивает plog (если он доступен).
+/// @param sc Контекст исследования, содержащий persistent-хранилище.
+/// @return void.
+/// @note Создаёт каталог Logs, включает кольцевой файл журнала и помечает это в persistent-хранилище Sierra Chart, чтобы не повторять работу.
+/// @warning При ошибках файловой системы помечает флаг `-1` и продолжает выполнение без логирования.
 void EnsureLogging(SCStudyGraphRef sc) {
   if (sc.Index != 0) {
     return;
@@ -52,34 +53,24 @@ void EnsureLogging(SCStudyGraphRef sc) {
 void EnsureLogging(SCStudyGraphRef) {}
 #endif
 
-StudyState* GetOrCreateState(SCStudyGraphRef sc) {
-  auto* state = static_cast<StudyState*>(sc.GetPersistentPointer(kPersistState));
-  if (state == nullptr) {
-    state = new StudyState{};
-    sc.SetPersistentPointer(kPersistState, state);
-  }
-  return state;
-}
-
-void DestroyState(SCStudyGraphRef sc) {
-  auto* state = static_cast<StudyState*>(sc.GetPersistentPointer(kPersistState));
-  if (state != nullptr) {
-    delete state;
-    sc.SetPersistentPointer(kPersistState, nullptr);
-  }
-}
-
 }  // namespace
 
+/// @brief Обёртка ACSIL, которая перенаправляет данные в ядро Core.
+/// @param sc Контекст Sierra Chart для текущего исследования.
+/// @return void.
+/// @note Повторяет структуру из примеров Sierra Chart: в SetDefaults задаёт все опции, во второй секции формирует буфер и вызывает Core.
+/// @warning Перед использованием убедитесь, что `SIERRA_SDK_DIR` и `SIERRA_DATA_DIR` заданы корректно, иначе сборка/копирование DLL не сработают.
 SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
+  sierra::acsil::LogDllStartup(sc);
   SCSubgraphRef ma = sc.Subgraph[0];
   SCInputRef periodInput = sc.Input[0];
 
   if (sc.SetDefaults) {
+    // Раздел 1 — настройка по умолчанию (как в примерах Sierra Chart).
     sc.GraphName = "SierraStudy - Moving Average";
     sc.StudyDescription = "Example ACSIL study wrapping the core moving average.";
     sc.AutoLoop = 1;
-    sc.FreeDLL = 1;
+    sc.FreeDLL = 1;  // позволяет перестраивать DLL без перезапуска Sierra Chart
     sc.GraphRegion = 0;
 
     ma.Name = "Moving Average";
@@ -97,15 +88,13 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   }
 
   if (sc.LastCallToFunction) {
-    DestroyState(sc);
     return;
   }
 
+  // Раздел 2 — обработка данных исследования.
   EnsureLogging(sc);
 
-  auto* state = GetOrCreateState(sc);
-
-  const int period = std::max(1, periodInput.GetInt());
+  const int period = (std::max)(1, periodInput.GetInt());
   sc.DataStartIndex = period - 1;
 
   const int length = sc.ArraySize;
@@ -114,14 +103,23 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     return;
   }
 
-  state->closeBuffer.resize(static_cast<std::size_t>(sc.Index + 1));
+  // Формируем локальный буфер цен закрытия — в том же стиле, что и примеры
+  // Sierra Chart. Так ядро получает std::vector без прямой зависимости от ACSIL.
+  std::vector<double> closes(static_cast<std::size_t>(sc.Index + 1));
   for (int i = 0; i <= sc.Index; ++i) {
-    state->closeBuffer[static_cast<std::size_t>(i)] = sc.Close[i];
+    closes[static_cast<std::size_t>(i)] = sc.Close[i];
   }
 
+  // Передаём данные в ядро Core: функция вернёт массив SMA, берём последнее
+  // значение и выводим его в Subgraph.
   const auto averages =
-      sierra::core::moving_average(state->closeBuffer, static_cast<std::size_t>(period));
+      sierra::core::moving_average(closes, static_cast<std::size_t>(period));
   const double value = averages.back();
   ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
                                    : static_cast<float>(value);
 }
+
+
+
+
+

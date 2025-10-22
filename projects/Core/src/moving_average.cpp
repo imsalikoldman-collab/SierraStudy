@@ -5,6 +5,9 @@
 
 namespace sierra::core {
 
+/// @brief Реализация простого скользящего среднего.
+/// @note Использует «скользящую сумму» для линейного вычисления.
+/// @warning Период 0 недопустим — функция выбрасывает исключение.
 std::vector<double> moving_average(const std::vector<double>& input, std::size_t period) {
   if (period == 0) {
     throw std::invalid_argument("moving_average period must be greater than zero");
