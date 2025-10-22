@@ -2,6 +2,7 @@
 
 #include "sierra/core/moving_average.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -15,10 +16,17 @@
 #define SIERRA_STUDY_HAS_PLOG 0
 #endif
 
+// Group name displayed in Sierra Chart "Add Custom Study" dialog.
+SCDLLName("SierraStudy Custom Studies")
+
 namespace {
 
+constexpr int kPersistState = 0;
 constexpr int kPersistLogging = 1;
-constexpr int kPersistLastPeriod = 2;
+
+struct StudyState {
+  std::vector<double> closeBuffer;
+};
 
 #if SIERRA_STUDY_HAS_PLOG
 void EnsureLogging(SCStudyGraphRef sc) {
@@ -44,8 +52,21 @@ void EnsureLogging(SCStudyGraphRef sc) {
 void EnsureLogging(SCStudyGraphRef) {}
 #endif
 
-int SanitizePeriod(int period) {
-  return period < 1 ? 1 : period;
+StudyState* GetOrCreateState(SCStudyGraphRef sc) {
+  auto* state = static_cast<StudyState*>(sc.GetPersistentPointer(kPersistState));
+  if (state == nullptr) {
+    state = new StudyState{};
+    sc.SetPersistentPointer(kPersistState, state);
+  }
+  return state;
+}
+
+void DestroyState(SCStudyGraphRef sc) {
+  auto* state = static_cast<StudyState*>(sc.GetPersistentPointer(kPersistState));
+  if (state != nullptr) {
+    delete state;
+    sc.SetPersistentPointer(kPersistState, nullptr);
+  }
 }
 
 }  // namespace
@@ -58,6 +79,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     sc.GraphName = "SierraStudy - Moving Average";
     sc.StudyDescription = "Example ACSIL study wrapping the core moving average.";
     sc.AutoLoop = 1;
+    sc.FreeDLL = 1;
     sc.GraphRegion = 0;
 
     ma.Name = "Moving Average";
@@ -69,44 +91,37 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     periodInput.Name = "Period";
     periodInput.SetInt(20);
     periodInput.SetIntLimits(1, 500);
-    sc.UpdateStartIndex = periodInput.GetInt() - 1;
+
+    sc.DataStartIndex = periodInput.GetInt() - 1;
     return;
   }
 
   if (sc.LastCallToFunction) {
+    DestroyState(sc);
     return;
   }
 
   EnsureLogging(sc);
 
-  int period = SanitizePeriod(periodInput.GetInt());
-  sc.UpdateStartIndex = period - 1;
-  const int storedPeriod = sc.GetPersistentInt(kPersistLastPeriod);
-  if (storedPeriod != period) {
-    sc.SetPersistentInt(kPersistLastPeriod, period);
-#if SIERRA_STUDY_HAS_PLOG
-    if (storedPeriod != 0) {
-      PLOG_INFO << "Updated moving average period to " << period;
-    }
-#endif
-  }
+  auto* state = GetOrCreateState(sc);
 
-  const int length = sc.Index + 1;
+  const int period = std::max(1, periodInput.GetInt());
+  sc.DataStartIndex = period - 1;
+
+  const int length = sc.ArraySize;
   if (length <= 0) {
     ma[sc.Index] = std::numeric_limits<float>::quiet_NaN();
     return;
   }
 
-  std::vector<double> closes(static_cast<std::size_t>(length));
-  for (int i = 0; i < length; ++i) {
-    closes[static_cast<std::size_t>(i)] = sc.Close[i];
+  state->closeBuffer.resize(static_cast<std::size_t>(sc.Index + 1));
+  for (int i = 0; i <= sc.Index; ++i) {
+    state->closeBuffer[static_cast<std::size_t>(i)] = sc.Close[i];
   }
 
-  const auto averages = sierra::core::moving_average(closes, static_cast<std::size_t>(period));
+  const auto averages =
+      sierra::core::moving_average(state->closeBuffer, static_cast<std::size_t>(period));
   const double value = averages.back();
-  if (std::isnan(value)) {
-    ma[sc.Index] = std::numeric_limits<float>::quiet_NaN();
-  } else {
-    ma[sc.Index] = static_cast<float>(value);
-  }
+  ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
+                                   : static_cast<float>(value);
 }

@@ -23,4 +23,11 @@ pwsh -File scripts\Invoke-All.ps1 -SkipHotSwap
 
 # Запуск только тестов с фильтром
 pwsh -File scripts\Invoke-Tests.ps1 -Executable out\x64\Debug\SierraStudy.Tests.exe -Filter "MovingAverageTest.*"
+
+# Горячая замена релизной DLL в Sierra Chart
+pwsh -File scripts\BuildAndSwap.ps1 -Configuration Release
 ```
+
+## Что сделать в Sierra Chart после копирования
+1. В меню `Analysis → Build → Release All DLLs and Deny Load`, чтобы разблокировать предыдущую версию.
+2. `Analysis → Add Custom Study → Add Custom Study → Browse` и выберите `C:\2308\Data\SierraStudy.dll`. После этого в списке появится `SierraStudy - Moving Average`.
