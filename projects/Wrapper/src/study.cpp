@@ -1,5 +1,5 @@
 #include "sierra/acsil/study.hpp"
-#include "sierra/acsil/startup.hpp"
+#include "sierra/acsil/supportFunction.hpp"
 
 #include "sierra/core/moving_average.hpp"
 

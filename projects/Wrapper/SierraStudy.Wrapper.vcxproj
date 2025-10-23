@@ -66,10 +66,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\sierra\acsil\study.hpp" />
+    <ClInclude Include="include\sierra\acsil\supportFunction.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\study.cpp" />
-    <ClCompile Include="src\\startup.cpp" />
+    <ClCompile Include="src\\supportFunction.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Core\SierraStudy.Core.vcxproj">
