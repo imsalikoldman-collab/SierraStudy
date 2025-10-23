@@ -1,7 +1,7 @@
 /**
- * @brief Набор модульных тестов для функции вычисления скользящего среднего.
- * @note Проверяем как корректные расчёты, так и реакцию на некорректный период.
- * @warning Тесты предполагают, что реализация возвращает NaN до накопления периода и бросает исключение при периоде 0.
+ * @brief Набор тестов для проверки функции скользящего среднего из ядра.
+ * @note Содержит сценарии на корректный расчёт и валидацию параметров.
+ * @warning При изменении поведения moving_average обновляйте и тесты.
  */
 #include "sierra/core/moving_average.hpp"
 
@@ -13,6 +13,13 @@
 
 namespace {
 
+/**
+ * @brief Убеждаемся, что функция возвращает NaN, пока недостаточно данных для окна.
+ * @param Нет параметров.
+ * @return void Тест не возвращает значение.
+ * @note После накопления period элементов происходит корректный расчёт.
+ * @warning Тест чувствителен к первоначальным значениям и выбранному периоду.
+ */
 TEST(MovingAverageTest, ProducesNaNUntilEnoughSamples) {
   const std::vector<double> input{1.0, 2.0, 3.0, 4.0, 5.0};
   const auto output = sierra::core::moving_average(input, 3);
@@ -25,9 +32,17 @@ TEST(MovingAverageTest, ProducesNaNUntilEnoughSamples) {
   EXPECT_DOUBLE_EQ(output[4], 4.0);
 }
 
+/**
+ * @brief Проверяет, что период равный нулю приводит к выбросу исключения.
+ * @param Нет параметров.
+ * @return void Тест не возвращает значение.
+ * @note Исключение должно иметь тип std::invalid_argument.
+ * @warning При изменении типа исключения тест нужно обновить.
+ */
 TEST(MovingAverageTest, ThrowsOnZeroPeriod) {
   const std::vector<double> input{1.0, 2.0};
   EXPECT_THROW(sierra::core::moving_average(input, 0), std::invalid_argument);
 }
 
 }  // namespace
+

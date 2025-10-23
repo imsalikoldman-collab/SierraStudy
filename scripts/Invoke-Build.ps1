@@ -29,8 +29,25 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $scriptRoot '..')
 $resolveScript = Join-Path $scriptRoot 'Resolve-Msbuild.ps1'
 $msbuildPath = & $resolveScript -ThrowIfNotFound
+
+Push-Location $repoRoot
+try {
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+  if ($gitCmd) {
+    Write-Host "[deps] git submodule update --init --recursive"
+    & $gitCmd.Source 'submodule' 'update' '--init' '--recursive'
+    if ($LASTEXITCODE -ne 0) {
+      throw "git submodule update failed with exit code $LASTEXITCODE."
+    }
+  } else {
+    Write-Warning "[deps] git executable not found, skipping submodule update."
+  }
+} finally {
+  Pop-Location
+}
 
 if (-not (Test-Path -LiteralPath $Solution)) {
   throw "Solution or project file not found: $Solution"

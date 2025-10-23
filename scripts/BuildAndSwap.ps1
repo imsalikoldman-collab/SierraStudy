@@ -52,6 +52,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $scriptRoot '..')
+Push-Location $repoRoot
+try {
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+  if ($gitCmd) {
+    Write-Host "[deps] git submodule update --init --recursive"
+    & $gitCmd.Source 'submodule' 'update' '--init' '--recursive'
+    if ($LASTEXITCODE -ne 0) {
+      throw "git submodule update failed with exit code $LASTEXITCODE."
+    }
+  } else {
+    Write-Warning "[deps] git executable not found, skipping submodule update."
+  }
+} finally {
+  Pop-Location
+}
+
 $solution = Join-Path $PSScriptRoot '..\SierraStudy.sln'
 $invokeBuild = Join-Path $PSScriptRoot 'Invoke-Build.ps1'
 if (-not (Test-Path -LiteralPath $invokeBuild)) {

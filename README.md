@@ -30,5 +30,6 @@ SierraStudy — шаблон репозитория для пользовате�
 ## Зависимости
 - **Google Test** — находится в `third_party/googletest` (подмодуль или ручная копия).
 - **plog** — header-only логгер в `third_party/plog`.
+- **RapidYAML (ryml)** - git submodule - `third_party/rapidyaml` ��� ������������ YAML � Core/Wrapper.
 
 Дополнительные детали см. в `AGENTS.md` и `external/README.md`.

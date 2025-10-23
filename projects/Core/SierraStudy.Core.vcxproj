@@ -59,6 +59,19 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\moving_average.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\common.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\node.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\parse.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\preprocess.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\tree.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\base64.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\char_traits.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\error.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\format.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\language.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\memory_resource.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\memory_util.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\utf.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
