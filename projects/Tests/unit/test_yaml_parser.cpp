@@ -2,8 +2,9 @@
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>
+#include <c4/charconv.hpp>
 
-#include <string>
+#include <stdexcept>
 
 /**
  * @brief Преобразует значение узла YAML в число двойной точности.
@@ -14,7 +15,16 @@
  */
 static double NodeToDouble(const ryml::ConstNodeRef& node) {
   const auto scalar = node.val();
-  return std::stod(std::string(scalar.begin(), scalar.end()));
+  if (scalar.empty()) {
+    throw std::invalid_argument("YAML scalar is empty");
+  }
+
+  double result{};
+  if (!c4::from_chars(scalar, &result)) {
+    throw std::invalid_argument("Failed to parse YAML scalar as double");
+  }
+
+  return result;
 }
 
 /**
