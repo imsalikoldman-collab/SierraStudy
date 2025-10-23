@@ -1,17 +1,9 @@
-#include <gtest/gtest.h>
-
-#include <ryml.hpp>
-#include <ryml_std.hpp>
-#include <c4/charconv.hpp>
-
-#include <stdexcept>
-
 /**
- * @brief Преобразует значение узла YAML в число двойной точности.
- * @param node Узел-скаляр, значение которого нужно прочитать.
- * @return double Числовое представление скаляра.
- * @note Для преобразования используется std::stod, поэтому допускается стандартный формат числа.
- * @warning При некорректном формате или переполнении будет выброшено стандартное исключение STL.
+ * @brief Преобразует скаляр YAML в число двойной точности.
+ * @param node Узел-скаляр, содержащий строку с числом.
+ * @return double Результат преобразования в формате double.
+ * @note Использует c4::from_chars, поэтому парсинг гарантированно locale-нейтрален.
+ * @warning При пустом значении или некорректном формате выбрасывает std::invalid_argument.
  */
 static double NodeToDouble(const ryml::ConstNodeRef& node) {
   const auto scalar = node.val();
