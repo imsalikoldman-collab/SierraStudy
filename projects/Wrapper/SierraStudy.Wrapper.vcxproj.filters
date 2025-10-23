@@ -12,9 +12,15 @@
     <ClInclude Include="include\sierra\acsil\study.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\sierra\acsil\supportFunction.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\study.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\supportFunction.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

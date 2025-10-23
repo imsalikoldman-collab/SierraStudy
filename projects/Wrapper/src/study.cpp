@@ -29,14 +29,14 @@ constexpr int kPersistLogging = 1;
 /// @param sc Контекст исследования, содержащий persistent-хранилище.
 /// @return void.
 /// @note Создаёт каталог Logs, включает кольцевой файл журнала и помечает это в persistent-хранилище Sierra Chart, чтобы не повторять работу.
-/// @warning При ошибках файловой системы помечает флаг `-1` и продолжает выполнение без логирования.
+/// @warning При ошибках файловой системы устанавливает флаг `-1` и больше не пытается повторять инициализацию в рамках текущей сессии.
 void EnsureLogging(SCStudyGraphRef sc) {
   if (sc.Index != 0) {
     return;
   }
 
   const int initialized = sc.GetPersistentInt(kPersistLogging);
-  if (initialized == 1) {
+  if (initialized == 1 || initialized == -1) {
     return;
   }
 

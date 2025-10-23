@@ -29,7 +29,7 @@
         "-File",
         "${workspaceFolder}/scripts/HotSwap.ps1",
         "-Dll",
-        "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Wrapper.dll",
+        "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.dll",
         "-SierraDataDir",
         "${env:SIERRA_DATA_DIR}"
       ]
