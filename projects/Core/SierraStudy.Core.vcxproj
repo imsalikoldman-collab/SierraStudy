@@ -56,9 +56,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\sierra\core\moving_average.hpp" />
+    <ClInclude Include="include\sierra\core\plan.hpp" />
+    <ClInclude Include="include\sierra\core\plan_formatter.hpp" />
+    <ClInclude Include="include\sierra\core\plan.hpp" />
+    <ClInclude Include="include\sierra\core\yaml_plan_loader.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\moving_average.cpp" />
+    <ClCompile Include="src\plan_formatter.cpp" />
+    <ClCompile Include="src\yaml_plan_loader.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\common.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\node.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\parse.cpp" />

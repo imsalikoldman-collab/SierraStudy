@@ -1,3 +1,9 @@
+#include <gtest/gtest.h>
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+
+#include <stdexcept>
+
 /**
  * @brief Преобразует скаляр YAML в число двойной точности.
  * @param node Узел-скаляр, содержащий строку с числом.

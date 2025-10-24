@@ -67,7 +67,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="unit\test_moving_average.cpp" />
+    <ClCompile Include="unit\test_plan_formatter.cpp" />
     <ClCompile Include="unit\test_yaml_parser.cpp" />
+    <ClCompile Include="unit\test_yaml_plan_loader.cpp" />
     <ClCompile Include="$(SolutionDir)third_party\googletest\googletest\src\gtest-all.cc">
       <AdditionalIncludeDirectories>$(SolutionDir)third_party\googletest;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>

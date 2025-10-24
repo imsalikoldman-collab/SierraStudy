@@ -12,7 +12,13 @@
     <ClCompile Include="unit\test_moving_average.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="unit\test_plan_formatter.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="unit\test_yaml_parser.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="unit\test_yaml_plan_loader.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)third_party\googletest\googletest\src\gtest-all.cc">
