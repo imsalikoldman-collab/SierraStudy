@@ -67,9 +67,13 @@
     <ClCompile Include="src\yaml_plan_loader.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\common.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\node.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\node_type.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\parse.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\preprocess.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\reference_resolver.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\tag.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\tree.cpp" />
+    <ClCompile Include="..\..\third_party\rapidyaml\src\c4\yml\version.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\base64.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\char_traits.cpp" />
     <ClCompile Include="..\..\third_party\rapidyaml\ext\c4core\src\c4\error.cpp" />

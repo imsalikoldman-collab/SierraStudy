@@ -84,7 +84,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
   }
 
   const auto direction_node = node.find_child("direction");
-  if (!direction_node.valid()) {
+  if (!direction_node.readable()) {
     *error = "Отсутствует обязательное поле direction";
     return false;
   }
@@ -93,7 +93,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
   }
 
   const auto range_node = node.find_child("range");
-  if (!range_node.valid()) {
+  if (!range_node.readable()) {
     *error = "Отсутствует обязательное поле range";
     return false;
   }
@@ -104,7 +104,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
   const auto sl_node = node.find_child("sl");
   const auto tp1_node = node.find_child("tp1");
   const auto tp2_node = node.find_child("tp2");
-  if (!sl_node.valid() || !tp1_node.valid() || !tp2_node.valid()) {
+  if (!sl_node.readable() || !tp1_node.readable() || !tp2_node.readable()) {
     *error = "Поля sl, tp1 и tp2 обязательны для каждой зоны";
     return false;
   }
@@ -120,7 +120,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
 
   out->invalid.reset();
   const auto invalid_node = node.find_child("invalid");
-  if (invalid_node.valid()) {
+  if (invalid_node.readable()) {
     PriceRange invalid{};
     if (!ParsePriceRangeNode(invalid_node, &invalid, error)) {
       return false;
@@ -130,7 +130,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
 
   out->notes.clear();
   const auto notes_node = node.find_child("notes");
-  if (notes_node.valid()) {
+  if (notes_node.readable()) {
     ParseNotes(notes_node, &out->notes);
   }
 
@@ -138,7 +138,7 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
 }
 
 bool ParseFlip(ryml::ConstNodeRef node, std::optional<FlipZone>* out, std::string* error) {
-  if (!node.valid() || (node.has_val() && node.val_is_null())) {
+  if (!node.readable() || (node.has_val() && node.val_is_null())) {
     out->reset();
     return true;
   }
@@ -150,7 +150,7 @@ bool ParseFlip(ryml::ConstNodeRef node, std::optional<FlipZone>* out, std::strin
   FlipZone flip{};
   const auto range_node = node.find_child("range");
   const auto label_node = node.find_child("label");
-  if (!range_node.valid() || !label_node.valid()) {
+  if (!range_node.readable() || !label_node.readable()) {
     *error = "Flip требует поля range и label";
     return false;
   }
@@ -169,10 +169,12 @@ bool ParseInstrument(ryml::ConstNodeRef node, InstrumentPlan* out, std::string* 
   }
 
   out->zones.clear();
-  if (auto zones_node = node.find_child("zones"); zones_node.valid()) {
-    if (!(zones_node.is_val() && zones_node.val_is_null())) {
+  if (auto zones_node = node.find_child("zones"); zones_node.readable()) {
+    if (zones_node.has_val() && zones_node.val_is_null()) {
+      // ????????????? null ??? ???????? ?????.
+    } else {
       if (!zones_node.is_seq()) {
-        *error = "Поле zones должно быть последовательностью";
+        *error = "???? zones ?????? ???? ???????????????????";
         return false;
       }
       out->zones.reserve(static_cast<std::size_t>(zones_node.num_children()));
@@ -231,14 +233,14 @@ PlanLoadResult LoadStudyPlanFromFile(const std::filesystem::path& path) {
   }
 
   const auto root = tree.rootref();
-  if (!root.valid()) {
+  if (!root.readable()) {
     result.error_message = "Корневой документ YAML невалиден";
     return result;
   }
 
   const auto version_node = root.find_child("v");
   const auto generated_node = root.find_child("generated_at");
-  if (!version_node.valid() || !generated_node.valid()) {
+  if (!version_node.readable() || !generated_node.readable()) {
     result.error_message = "Отсутствуют обязательные поля v или generated_at";
     return result;
   }
@@ -270,3 +272,4 @@ PlanLoadResult LoadStudyPlanFromFile(const std::filesystem::path& path) {
 }
 
 }  // namespace sierra::core
+

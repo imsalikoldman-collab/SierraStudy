@@ -40,7 +40,7 @@ TEST(RapidYamlSmokeTest, ParsesScalarMapping) {
   ASSERT_EQ(root.num_children(), 1u);
 
   const auto child = root.first_child();
-  ASSERT_TRUE(child.valid());
+  ASSERT_TRUE(child.readable());
   EXPECT_EQ(child.key(), ryml::to_csubstr("key"));
   EXPECT_EQ(child.val(), ryml::to_csubstr("value"));
 }
@@ -83,7 +83,7 @@ ES:
 
   ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(kYaml));
   const auto root = tree.rootref();
-  ASSERT_TRUE(root.valid());
+  ASSERT_TRUE(root.readable());
   ASSERT_EQ(root.num_children(), 4u);
 
   EXPECT_EQ(root["v"].val(), ryml::to_csubstr("1.5-min-obj"));
@@ -103,7 +103,7 @@ ES:
   EXPECT_NEAR(NodeToDouble(nqRange0.child(1)), 15435.00, 1e-6);
 
   const auto nqFlip = nq["flip"];
-  ASSERT_TRUE(nqFlip.valid());
+  ASSERT_TRUE(!nqFlip.is_seed());
   EXPECT_EQ(nqFlip["label"].val(), ryml::to_csubstr("NQ Flip"));
 
   ASSERT_TRUE(root.has_child("ES"));
@@ -139,7 +139,7 @@ TEST(RapidYamlSpecTest, HandlesOptionalInvalidRangesAndNotes) {
 
   ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(kYaml));
   const auto root = tree.rootref();
-  ASSERT_TRUE(root.valid());
+  ASSERT_TRUE(root.readable());
   const auto zones = root["zones"];
   ASSERT_EQ(zones.num_children(), 2u);
 

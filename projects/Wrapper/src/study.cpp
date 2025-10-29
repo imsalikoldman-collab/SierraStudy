@@ -7,6 +7,7 @@
 #include "sierra/core/yaml_plan_loader.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <limits>
@@ -49,6 +50,9 @@ struct PlanWatcherState {
   std::string rendered_text;
   bool dirty = false;
   int table_line_number = 0;
+  std::vector<int> plan_drawing_line_numbers;
+  bool graphics_dirty = false;
+  SCDateTime plan_start_time{};
 };
 
 #if SIERRA_STUDY_HAS_PLOG
@@ -117,6 +121,22 @@ void LogError(SCStudyGraphRef sc, const std::string& message) {
  * @note Вызывается перед обращением к наблюдателю; память освобождается ReleasePlanState.
  * @warning Не храните возвращённый указатель вне функции между вызовами без проверки.
  */
+std::string ToUpperASCII(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::toupper(ch));
+  });
+  return value;
+}
+
+void ClearPlanDrawings(SCStudyGraphRef sc, PlanWatcherState& state) {
+  for (const int line_number : state.plan_drawing_line_numbers) {
+    if (line_number != 0) {
+      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line_number);
+    }
+  }
+  state.plan_drawing_line_numbers.clear();
+}
+
 PlanWatcherState* AcquirePlanState(SCStudyGraphRef sc) {
   auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState));
   if (state == nullptr) {
@@ -136,6 +156,7 @@ PlanWatcherState* AcquirePlanState(SCStudyGraphRef sc) {
 void ReleasePlanState(SCStudyGraphRef sc) {
   auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState));
   if (state != nullptr) {
+    ClearPlanDrawings(sc, *state);
     sc.SetPersistentPointer(kPersistPlanState, nullptr);
     delete state;
   }
@@ -156,13 +177,24 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
     return;
   }
 
+  const auto mark_plan_unavailable = [&](const std::string& text) {
+    state->plan.reset();
+    state->graphics_dirty = true;
+    if (state->rendered_text != text) {
+      state->rendered_text = text;
+      state->dirty = true;
+    }
+  };
+
   if (plan_path.empty()) {
     if (!state->path_reported_empty) {
-      LogError(sc, "[plan] Путь к YAML не задан");
+      LogError(sc, "[plan] ???? ? YAML ?? ?????");
       state->path_reported_empty = true;
     }
+    mark_plan_unavailable("[plan]\nPlan path is empty.");
     return;
   }
+  state->path_reported_empty = false;
 
   const double now = sc.CurrentSystemDateTime.GetAsDouble();
   if (state->last_check_timestamp != 0.0) {
@@ -176,35 +208,30 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   std::error_code ec;
   const bool exists = std::filesystem::exists(plan_path, ec);
   if (ec) {
-    LogError(sc, "[plan] Ошибка проверки файла: " + ec.message());
+    LogError(sc, "[plan] ?????? ???????? ?????: " + ec.message());
     return;
   }
 
   if (!exists) {
     if (!state->status_known || state->file_available) {
-      LogError(sc, "[plan] Файл не найден: " + plan_path.string());
+      LogError(sc, "[plan] ???? ?? ??????: " + plan_path.string());
     }
     state->status_known = true;
     state->file_available = false;
     state->has_last_write = false;
-    state->plan.reset();
-    const std::string missing_text = "[plan]\nPlan file unavailable.";
-    if (state->rendered_text != missing_text) {
-      state->rendered_text = missing_text;
-      state->dirty = true;
-    }
+    mark_plan_unavailable("[plan]\nPlan file unavailable.");
     return;
   }
 
   if (!state->status_known || !state->file_available) {
-    LogInfo(sc, "[plan] Файл обнаружен: " + plan_path.string());
+    LogInfo(sc, "[plan] ???? ?????????: " + plan_path.string());
   }
   state->status_known = true;
   state->file_available = true;
 
   const auto current_write = std::filesystem::last_write_time(plan_path, ec);
   if (ec) {
-    LogError(sc, "[plan] Ошибка чтения метки времени: " + ec.message());
+    LogError(sc, "[plan] ?????? ?????? ????? ???????: " + ec.message());
     return;
   }
 
@@ -215,7 +242,7 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   state->last_write = current_write;
   state->has_last_write = true;
 
-  LogInfo(sc, "[plan] Обнаружено изменение: " + plan_path.string());
+  LogInfo(sc, "[plan] ?????????? ?????????: " + plan_path.string());
 
   const auto load_result = sierra::core::LoadStudyPlanFromFile(plan_path);
   if (!load_result.success()) {
@@ -225,11 +252,22 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   }
 
   state->plan = std::make_shared<sierra::core::StudyPlan>(load_result.plan);
+  state->graphics_dirty = true;
+
+  SCDateTime fallback_time = 0.0;
+  if (sc.ArraySize > 0) {
+    fallback_time = sc.BaseDateTimeIn[sc.ArraySize - 1];
+  }
+  if (fallback_time == 0.0) {
+    fallback_time = now;
+  }
+  state->plan_start_time =
+      sierra::acsil::ConvertIso8601ToSCDateTime(state->plan->generated_at_iso8601, fallback_time);
 
   std::ostringstream read_msg;
   const auto file_size = std::filesystem::file_size(plan_path, ec);
   if (ec) {
-    read_msg << "[plan] File read: OK (size недоступен)";
+    read_msg << "[plan] File read: OK (size ??????????)";
   } else {
     read_msg << "[plan] File read: OK (" << file_size << " bytes)";
   }
@@ -293,6 +331,68 @@ void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
   state.dirty = false;
 }
 
+const sierra::core::InstrumentPlan* FindInstrumentPlanForSymbol(SCStudyGraphRef sc,
+                                                                const sierra::core::StudyPlan& plan) {
+  if (plan.instruments.empty()) {
+    return nullptr;
+  }
+
+  const std::string symbol_upper = ToUpperASCII(sc.Symbol.GetChars());
+  const sierra::core::InstrumentPlan* fallback = nullptr;
+  const sierra::core::InstrumentPlan* best_match = nullptr;
+  std::size_t best_match_length = 0;
+
+  for (const auto& [ticker, instrument] : plan.instruments) {
+    if (fallback == nullptr) {
+      fallback = &instrument;
+    }
+    const std::string ticker_upper = ToUpperASCII(ticker);
+    if (!ticker_upper.empty() && symbol_upper.find(ticker_upper) != std::string::npos &&
+        ticker_upper.length() > best_match_length) {
+      best_match_length = ticker_upper.length();
+      best_match = &instrument;
+    }
+  }
+
+  return best_match != nullptr ? best_match : fallback;
+}
+
+void RenderPlanGraphics(SCStudyGraphRef sc, PlanWatcherState& state) {
+  if (!state.graphics_dirty) {
+    return;
+  }
+
+  if (state.plan == nullptr || sc.ArraySize <= 0) {
+    ClearPlanDrawings(sc, state);
+    state.graphics_dirty = false;
+    return;
+  }
+
+  const auto* instrument = FindInstrumentPlanForSymbol(sc, *state.plan);
+  if (instrument == nullptr) {
+    ClearPlanDrawings(sc, state);
+    state.graphics_dirty = false;
+    return;
+  }
+
+  SCDateTime start_time = state.plan_start_time;
+  if (start_time == 0.0) {
+    start_time = sc.BaseDateTimeIn[0];
+  }
+  if (start_time == 0.0) {
+    start_time = sc.BaseDateTimeIn[sc.ArraySize - 1];
+  }
+
+  SCDateTime end_time = sc.BaseDateTimeIn[sc.ArraySize - 1] + 1.0;
+  if (end_time <= start_time) {
+    end_time = start_time + 1.0;
+  }
+
+  sierra::acsil::RenderInstrumentPlanGraphics(sc, *instrument, start_time, end_time,
+                                              state.plan_drawing_line_numbers);
+  state.graphics_dirty = false;
+}
+
 }  // namespace
 
 /// @brief Примерная обёртка ACSIL, вызывающая ядро и обслуживающая YAML-план.
@@ -336,6 +436,8 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
       state->rendered_text.clear();
       state->dirty = true;
       RenderPlanTable(sc, *state);
+      state->graphics_dirty = true;
+      RenderPlanGraphics(sc, *state);
     }
     ReleasePlanState(sc);
     return;
@@ -351,6 +453,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   }
   UpdatePlanWatcher(sc, state, plan_path);
   RenderPlanTable(sc, *state);
+  RenderPlanGraphics(sc, *state);
 
   const int period = (std::max)(1, periodInput.GetInt());
   sc.DataStartIndex = period - 1;
@@ -372,6 +475,11 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
                                    : static_cast<float>(value);
 }
+
+
+
+
+
 
 
 
