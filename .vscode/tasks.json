@@ -5,6 +5,11 @@
       "label": "Build",
       "type": "shell",
       "command": "msbuild",
+      "options": {
+        "env": {
+          "PATH": "C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin;C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\BuildTools\\\\MSBuild\\\\Current\\\\Bin;${env:PATH}"
+        }
+      },
       "args": [
         "${workspaceFolder}/SierraStudy.sln",
         "/m",

@@ -34,9 +34,8 @@ TEST(PlanFormatterTest, BuildsTableWithZones) {
 
   EXPECT_NE(table.find("Plan version: 1.5-min-obj"), std::string::npos);
   EXPECT_NE(table.find("Generated at: 2025-10-24T06:45:00Z"), std::string::npos);
-  EXPECT_NE(table.find("NQ"), std::string::npos);
-  EXPECT_NE(table.find("BUY"), std::string::npos);
-  EXPECT_NE(table.find("24500.00-24900.00"), std::string::npos);
-  EXPECT_NE(table.find("24700.00-24800.00"), std::string::npos);
+  EXPECT_NE(table.find("Ticker: NQ"), std::string::npos);
+  EXPECT_NE(table.find("Zone 1 BUY 24500.00-24900.00 | SL 24400.00 | TP1 25000.00 | TP2 25100.00"),
+            std::string::npos);
+  EXPECT_NE(table.find("Flip: 24700.00-24800.00"), std::string::npos);
 }
-

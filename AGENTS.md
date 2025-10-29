@@ -57,7 +57,7 @@ SierraStudy/
 
 **Переменные окружения (на каждой машине):**
 - `SIERRA_SDK_DIR` → папка с заголовками ACSIL (обычно `.../SierraChart/ACS_Source`).
-- `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\SierraChart\Data`).
+- `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\2308\Data`).
 
 ---
 

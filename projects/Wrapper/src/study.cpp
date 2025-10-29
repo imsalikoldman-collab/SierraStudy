@@ -31,7 +31,8 @@ namespace {
 
 constexpr int kPersistLogging = 1;
 constexpr int kPersistPlanState = 2;
-constexpr double kPlanCheckIntervalSeconds = 1.0;
+constexpr double kDefaultPlanCheckIntervalSeconds = 15.0;
+constexpr double kMinPlanCheckIntervalSeconds = 1.0;
 constexpr double kSecondsPerDay = 24.0 * 60.0 * 60.0;
 
 /**
@@ -44,8 +45,12 @@ struct PlanWatcherState {
   bool has_last_write = false;
   bool file_available = false;
   bool status_known = false;
-  bool path_reported_empty = false;
+  bool directory_reported_empty = false;
+  bool file_name_reported_empty = false;
   double last_check_timestamp = 0.0;
+  double last_interval_seconds = kDefaultPlanCheckIntervalSeconds;
+  std::string last_directory_key;
+  std::string last_file_name_key;
   std::shared_ptr<sierra::core::StudyPlan> plan;
   std::string rendered_text;
   bool dirty = false;
@@ -128,6 +133,35 @@ std::string ToUpperASCII(std::string value) {
   return value;
 }
 
+std::string NormalizeDirectoryKey(const std::filesystem::path& directory) {
+  if (directory.empty()) {
+    return {};
+  }
+
+  std::filesystem::path normalized = directory;
+  try {
+    normalized = normalized.lexically_normal();
+  } catch (...) {
+    // Ignore normalization failures; fall back to original.
+  }
+
+  std::string generic = normalized.generic_string();
+  while (!generic.empty() && generic.back() == '/') {
+    generic.pop_back();
+  }
+  std::transform(generic.begin(), generic.end(), generic.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return generic;
+}
+
+std::string NormalizeFileNameKey(std::string file_name) {
+  std::transform(file_name.begin(), file_name.end(), file_name.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return file_name;
+}
+
 void ClearPlanDrawings(SCStudyGraphRef sc, PlanWatcherState& state) {
   for (const int line_number : state.plan_drawing_line_numbers) {
     if (line_number != 0) {
@@ -141,6 +175,8 @@ PlanWatcherState* AcquirePlanState(SCStudyGraphRef sc) {
   auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState));
   if (state == nullptr) {
     state = new PlanWatcherState{};
+    state->rendered_text = "[plan]\nAwaiting plan data...";
+    state->dirty = true;
     sc.SetPersistentPointer(kPersistPlanState, state);
   }
   return state;
@@ -164,15 +200,21 @@ void ReleasePlanState(SCStudyGraphRef sc) {
 
 
 /**
- * @brief Проверяет YAML-файл на наличие/изменение, выполняет чтение и парсинг.
- * @param sc Контекст study для логирования.
- * @param state Состояние наблюдателя (persistent).
- * @param plan_path Путь к YAML-файлу плана.
+ * @brief Мониторит YAML-план: валидирует входные параметры, отслеживает изменения и инициирует парсинг.
+ * @param sc Контекст Sierra Chart для логирования.
+ * @param state Persistent-состояние слежения.
+ * @param plan_directory Каталог, в котором ожидается файл плана.
+ * @param file_name Имя YAML-файла плана.
+ * @param poll_interval_seconds Период опроса файла в секундах.
  * @return void.
- * @note Интервал проверки ограничен одной секундой с помощью SCDateTime.
- * @warning При ошибках логирует подробности и не затирает предыдущий валидный план.
+ * @note Предотвращает лишние обращения к диску благодаря хранению времени последнего опроса.
+ * @warning При ошибках не удаляет прошлую валидную копию плана, чтобы графика оставалась актуальной.
  */
-void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::filesystem::path& plan_path) {
+void UpdatePlanWatcher(SCStudyGraphRef sc,
+                       PlanWatcherState* state,
+                       const std::filesystem::path& plan_directory,
+                       const std::string& file_name,
+                       double poll_interval_seconds) {
   if (state == nullptr) {
     return;
   }
@@ -186,20 +228,58 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
     }
   };
 
-  if (plan_path.empty()) {
-    if (!state->path_reported_empty) {
-      LogError(sc, "[plan] ???? ? YAML ?? ?????");
-      state->path_reported_empty = true;
+  const double interval = std::isfinite(poll_interval_seconds)
+                              ? (std::max)(poll_interval_seconds, kMinPlanCheckIntervalSeconds)
+                              : kDefaultPlanCheckIntervalSeconds;
+  if (state->last_interval_seconds != interval) {
+    state->last_interval_seconds = interval;
+    state->last_check_timestamp = 0.0;
+  }
+
+  const std::string directory_key = NormalizeDirectoryKey(plan_directory);
+  const std::string file_key = NormalizeFileNameKey(file_name);
+  const bool directory_changed = directory_key != state->last_directory_key;
+  const bool file_changed = file_key != state->last_file_name_key;
+  if (directory_changed || file_changed) {
+    state->last_directory_key = directory_key;
+    state->last_file_name_key = file_key;
+    state->has_last_write = false;
+    state->file_available = false;
+    state->status_known = false;
+    state->last_check_timestamp = 0.0;
+    state->plan_start_time = 0.0;
+    state->graphics_dirty = true;
+    state->plan.reset();
+    state->rendered_text = "[plan]\nAwaiting plan data...";
+    state->dirty = true;
+  }
+
+  if (plan_directory.empty()) {
+    if (!state->directory_reported_empty) {
+      LogError(sc, "[plan] Plan directory input is empty.");
+      state->directory_reported_empty = true;
     }
-    mark_plan_unavailable("[plan]\nPlan path is empty.");
+    mark_plan_unavailable("[plan]\nPlan directory is not set.");
     return;
   }
-  state->path_reported_empty = false;
+  state->directory_reported_empty = false;
+
+  if (file_name.empty()) {
+    if (!state->file_name_reported_empty) {
+      LogError(sc, "[plan] Plan file name input is empty.");
+      state->file_name_reported_empty = true;
+    }
+    mark_plan_unavailable("[plan]\nPlan file name is not set.");
+    return;
+  }
+  state->file_name_reported_empty = false;
+
+  std::filesystem::path plan_path = plan_directory / file_name;
 
   const double now = sc.CurrentSystemDateTime.GetAsDouble();
   if (state->last_check_timestamp != 0.0) {
     const double seconds_since_last = (now - state->last_check_timestamp) * kSecondsPerDay;
-    if (seconds_since_last < kPlanCheckIntervalSeconds) {
+    if (seconds_since_last < interval) {
       return;
     }
   }
@@ -208,30 +288,30 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   std::error_code ec;
   const bool exists = std::filesystem::exists(plan_path, ec);
   if (ec) {
-    LogError(sc, "[plan] ?????? ???????? ?????: " + ec.message());
+    LogError(sc, "[plan] Failed to query plan file: " + ec.message());
     return;
   }
 
   if (!exists) {
     if (!state->status_known || state->file_available) {
-      LogError(sc, "[plan] ???? ?? ??????: " + plan_path.string());
+      LogError(sc, "[plan] Plan file not found: " + plan_path.string());
     }
     state->status_known = true;
     state->file_available = false;
     state->has_last_write = false;
-    mark_plan_unavailable("[plan]\nPlan file unavailable.");
+    mark_plan_unavailable("[plan]\nPlan file is unavailable.");
     return;
   }
 
-  if (!state->status_known || !state->file_available) {
-    LogInfo(sc, "[plan] ???? ?????????: " + plan_path.string());
+  if (!state->status_known || !state->file_available || directory_changed || file_changed) {
+    LogInfo(sc, "[plan] Plan file detected: " + plan_path.string());
   }
   state->status_known = true;
   state->file_available = true;
 
   const auto current_write = std::filesystem::last_write_time(plan_path, ec);
   if (ec) {
-    LogError(sc, "[plan] ?????? ?????? ????? ???????: " + ec.message());
+    LogError(sc, "[plan] Failed to query last write time: " + ec.message());
     return;
   }
 
@@ -242,7 +322,7 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   state->last_write = current_write;
   state->has_last_write = true;
 
-  LogInfo(sc, "[plan] ?????????? ?????????: " + plan_path.string());
+  LogInfo(sc, "[plan] Detected plan update: " + plan_path.string());
 
   const auto load_result = sierra::core::LoadStudyPlanFromFile(plan_path);
   if (!load_result.success()) {
@@ -267,7 +347,7 @@ void UpdatePlanWatcher(SCStudyGraphRef sc, PlanWatcherState* state, const std::f
   std::ostringstream read_msg;
   const auto file_size = std::filesystem::file_size(plan_path, ec);
   if (ec) {
-    read_msg << "[plan] File read: OK (size ??????????)";
+    read_msg << "[plan] File read: OK (size unknown)";
   } else {
     read_msg << "[plan] File read: OK (" << file_size << " bytes)";
   }
@@ -303,18 +383,20 @@ void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
   s_UseTool tool;
   tool.Clear();
   tool.ChartNumber = sc.ChartNumber;
-  tool.DrawingType = DRAWING_TEXT;
+  tool.DrawingType = DRAWING_STATIONARY_TEXT;
   tool.AddMethod = UTAM_ADD_OR_ADJUST;
   tool.Color = RGB(255, 165, 0);
-  tool.FontSize = 14;
-  tool.FontBold = true;
+  tool.FontFace = "Consolas";
+  tool.FontSize = 8;
+  tool.FontBold = 0;
   tool.MultiLineLabel = 1;
   tool.TextAlignment = DT_LEFT | DT_TOP;
+  tool.TransparencyLevel = 0;
+  tool.AddAsUserDrawnDrawing = 0;
   tool.UseRelativeVerticalValues = 1;
-  tool.BeginValue = 95.0f;
-  SCDateTime anchor_time = sc.BaseDateTimeIn[sc.ArraySize - 1];
-  anchor_time -= 1.0;
-  tool.BeginDateTime = anchor_time;
+  tool.BeginDateTime = 2.0;
+  tool.BeginValue = 97.0f;
+  tool.EndValue = tool.BeginValue;
 
   if (state.table_line_number != 0) {
     tool.LineNumber = state.table_line_number;
@@ -389,7 +471,8 @@ void RenderPlanGraphics(SCStudyGraphRef sc, PlanWatcherState& state) {
   }
 
   sierra::acsil::RenderInstrumentPlanGraphics(sc, *instrument, start_time, end_time,
-                                              state.plan_drawing_line_numbers);
+                                              state.plan_drawing_line_numbers,
+                                              state.plan->generated_at_iso8601);
   state.graphics_dirty = false;
 }
 
@@ -404,7 +487,9 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   sierra::acsil::LogDllStartup(sc);
   SCSubgraphRef ma = sc.Subgraph[0];
   SCInputRef periodInput = sc.Input[0];
-  SCInputRef planPathInput = sc.Input[1];
+  SCInputRef planDirectoryInput = sc.Input[1];
+  SCInputRef planFileNameInput = sc.Input[2];
+  SCInputRef planPollIntervalInput = sc.Input[3];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - Moving Average";
@@ -424,8 +509,15 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     periodInput.SetInt(20);
     periodInput.SetIntLimits(1, 500);
 
-    planPathInput.Name = "Plan YAML Path";
-    planPathInput.SetString("test_files\\nq_intraday_flip_example.yaml");
+    planDirectoryInput.Name = "Plan Directory";
+    planDirectoryInput.SetString("");
+
+    planFileNameInput.Name = "Plan File Name";
+    planFileNameInput.SetString("nq_intraday_flip_example.yaml");
+
+    planPollIntervalInput.Name = "Plan Poll Interval (seconds)";
+    planPollIntervalInput.SetFloat(static_cast<float>(kDefaultPlanCheckIntervalSeconds));
+    planPollIntervalInput.SetFloatLimits(static_cast<float>(kMinPlanCheckIntervalSeconds), 600.0f);
 
     sc.DataStartIndex = periodInput.GetInt() - 1;
     return;
@@ -446,12 +538,22 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   EnsureLogging(sc);
 
   auto* state = AcquirePlanState(sc);
-  const SCString path_input = planPathInput.GetString();
-  std::filesystem::path plan_path;
-  if (path_input.GetLength() > 0) {
-    plan_path = std::filesystem::path(path_input.GetChars());
+
+  std::filesystem::path plan_directory;
+  const SCString directory_input = planDirectoryInput.GetString();
+  if (directory_input.GetLength() > 0) {
+    plan_directory = std::filesystem::path(directory_input.GetChars());
   }
-  UpdatePlanWatcher(sc, state, plan_path);
+
+  std::string plan_file_name;
+  const SCString file_input = planFileNameInput.GetString();
+  if (file_input.GetLength() > 0) {
+    plan_file_name = file_input.GetChars();
+  }
+
+  const double poll_interval = static_cast<double>(planPollIntervalInput.GetFloat());
+
+  UpdatePlanWatcher(sc, state, plan_directory, plan_file_name, poll_interval);
   RenderPlanTable(sc, *state);
   RenderPlanGraphics(sc, *state);
 

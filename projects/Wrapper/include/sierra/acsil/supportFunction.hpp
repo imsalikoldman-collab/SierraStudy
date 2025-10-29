@@ -35,6 +35,7 @@ SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fal
  * @param start_time Время начала отображения (обычно время генерации плана).
  * @param end_time Время окончания (правый край графика).
  * @param line_numbers Контейнер с номерами созданных объектов (обновляется функцией).
+ * @param generated_at_iso8601 Строковое представление метки времени генерации плана.
  * @note Перед построением функция удаляет объекты, перечисленные в line_numbers.
  * @warning Убедитесь, что line_numbers принадлежит текущему инстансу study.
  */
@@ -42,6 +43,7 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
                                   const sierra::core::InstrumentPlan& instrument,
                                   SCDateTime start_time,
                                   SCDateTime end_time,
-                                  std::vector<int>& line_numbers);
+                                  std::vector<int>& line_numbers,
+                                  const std::string& generated_at_iso8601);
 
 }  // namespace sierra::acsil
