@@ -14,6 +14,7 @@
 @param AllowCommandFormat Формат строки команды для разрешения загрузки DLL.
 @param WaitTimeoutSeconds Таймаут ожидания освобождения файла.
 @param WaitIntervalMilliseconds Интервал проверки освобождения.
+@param SierraDataDir Каталог назначения для DLL Sierra Chart (игнорирует SIERRA_DATA_DIR, если задан).
 @return Ничего. При ошибках сборки/тестов/копирования будет выброшено исключение.
 @note Скрипт вызывает вспомогательные Invoke-Build, Invoke-Tests и HotSwap. По умолчанию при блокировке файла активируется удалённый сценарий Release/Allow (отключается ключом -DisableRemoteFallback).
 @warning Убедитесь, что переменная окружения SIERRA_DATA_DIR установлена перед запуском горячей замены.
@@ -47,7 +48,9 @@ param(
 
   [int]$WaitTimeoutSeconds = 20,
 
-  [int]$WaitIntervalMilliseconds = 250
+  [int]$WaitIntervalMilliseconds = 250,
+
+  [string]$SierraDataDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,15 +109,23 @@ if (-not $SkipTests) {
 }
 
 if (-not $NoHotSwap) {
+  if ([string]::IsNullOrWhiteSpace($SierraDataDir)) {
+    if (Test-Path -LiteralPath 'C:\2308\Data') {
+      $SierraDataDir = 'C:\2308\Data'
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:SIERRA_DATA_DIR)) {
+      $SierraDataDir = $env:SIERRA_DATA_DIR
+    }
+  }
+
   $hotSwapScript = Join-Path $PSScriptRoot 'HotSwap.ps1'
   if (-not (Test-Path -LiteralPath $hotSwapScript)) {
     throw "HotSwap script not found: $hotSwapScript"
   }
 
-  if ($env:SIERRA_DATA_DIR) {
+  if (-not [string]::IsNullOrWhiteSpace($SierraDataDir)) {
     & pwsh -NoProfile -File $hotSwapScript `
       -Dll $wrapperDll `
-      -SierraDataDir $env:SIERRA_DATA_DIR `
+      -SierraDataDir $SierraDataDir `
       -UseRemoteRelease:$RemoteHotSwap `
       -AutoRemoteFallback:(!$DisableRemoteFallback) `
       -SierraHost $SierraHost `
@@ -124,7 +135,7 @@ if (-not $NoHotSwap) {
       -WaitTimeoutSeconds $WaitTimeoutSeconds `
       -WaitIntervalMilliseconds $WaitIntervalMilliseconds
   } else {
-    Write-Warning 'SIERRA_DATA_DIR is not set. Skipping hot-swap step.'
+    Write-Warning 'Sierra data directory is not defined (set parameter SierraDataDir or environment SIERRA_DATA_DIR). Skipping hot-swap step.'
   }
 } else {
   Write-Warning 'Hot-swap disabled by -NoHotSwap.'
