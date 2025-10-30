@@ -10,19 +10,23 @@
 - Таблица формируется функцией `sierra::core::FormatPlanAsTable`.
 - Все значения форматируются с точностью до двух знаков после запятой и используют `.` в качестве десятичного разделителя.
 - Блоки для разных тикеров отделяются пустой строкой.
+- В рабочем режиме (вызов из Wrapper) отображается **только** тикер, соответствующий символу текущего чарта.
+- Для каждого тикера выводятся максимум две строки зон: `Long` (если задана `zone_long`) и `Short` (если задана `zone_short`).
 
 ## Структура блока
 
 Каждый блок состоит из следующих строк:
 
-1. `Plan version: <string>` — версия спецификации (из поля `plan.version`).
-2. `Generated at: <datetime>` — ISO‑8601 отметка времени (`plan.generated_at_iso8601`).
-3. `Ticker: <symbol>` — тикер инструмента.
-4. Строки зон (для каждого элемента `zones[]`):
-   - `  Zone <index> <direction> <range_low>-<range_high> | SL <sl> | TP1 <tp1> | TP2 <tp2>`
-   - При наличии `invalid` добавляется строка `    Invalid: <invalid_low>-<invalid_high>`.
-5. Строка flip‑зоны (если задана):
-   - `  Flip: <flip_low>-<flip_high>`
+1. `Plan version: <string>` — версия спецификации (поле `plan.version`).
+2. `Generated date (NY): <YYYY-MM-DD>` — дата генерации в часовом поясе America/New_York.
+3. `Generated time (NY): <HH:MM:SS America/New_York>` — время генерации в часовом поясе America/New_York.
+4. `Ticker: <symbol>` — тикер инструмента (подобранный под символ чарта).
+5. Строки зон (для каждого из максимум двух объектов `zone_long` / `zone_short`, если присутствуют):
+   - `  Long: <label> | Range <low>-<high> | SL <sl> | TP1 <tp1> | TP2 <tp2>`
+   - `  Short: <label> | Range <low>-<high> | SL <sl> | TP1 <tp1> | TP2 <tp2>`
+   - При наличии диапазона инвалидации добавляется дополнительная строка `    Invalidation: <low>-<high>`.
+6. Строка flip‑зоны (если задана):
+   - `  Flip: <label> | Range <low>-<high>`
 
 Если у тикера нет ни зон, ни flip, выводится строка `  (no zones)`.
 
@@ -30,12 +34,12 @@
 
 ```
 Plan version: 1.5-min-obj
-Generated at: 2025-10-24T06:45:00Z
+Generated date (NY): 2025-10-24
+Generated time (NY): 02:45:00 America/New_York
 Ticker: NQ
-  Zone 1 BUY 24500.00-24900.00 | SL 24400.00 | TP1 25000.00 | TP2 25100.00
-    Invalid: 24400.00-24420.00
-  Flip: 24700.00-24800.00
+  Long: NQ long 24500-24900 | Range 24500.00-24900.00 | SL 24400.00 | TP1 25000.00 | TP2 25100.00
+    Invalidation: 24400.00-24420.00
+  Flip: Bias change | Range 24700.00-24800.00
 ```
 
 > Напоминание: таблица отображается моноширинным шрифтом, поэтому рекомендуемые отступы и выравнивание достигнуты за счёт пробелов.
-

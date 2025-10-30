@@ -2,15 +2,19 @@ v: "1.5-min-obj"
 generated_at: "2025-10-24T06:45:00Z"
 
 NQ:
-  zones:
-    - direction: buy
-      range: [24500.0, 24900.0]
-      sl: 24400.0
-      tp1: 25000.0
-      tp2: 25100.0
-      invalid: [24300.0, 24400.0]
+  zone_long:
+    label: "NQ long 24500-24900"
+    range: [24500.0, 24900.0]
+    sl: 24400.0
+    tp1: 25000.0
+    tp2: 25100.0
+    invalidation: [24300.0, 24400.0]
+  zone_short: null
   flip:
     range: [24700.0, 24800.0]
-    label: "Flip zone 24700-24800"
+    label: "Bias change"
 
-ES: { zones: [], flip: null }
+ES:
+  zone_long: null
+  zone_short: null
+  flip: null

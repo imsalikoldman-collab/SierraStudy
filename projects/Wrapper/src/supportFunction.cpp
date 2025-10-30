@@ -157,14 +157,6 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     line_numbers.push_back(tool.LineNumber);
   };
 
-  const auto find_note = [&](const core::Zone& zone, const char* key) -> std::optional<std::string> {
-    const auto it = zone.notes.find(key);
-    if (it != zone.notes.end() && !it->second.empty()) {
-      return it->second;
-    }
-    return std::nullopt;
-  };
-
   struct LabelInfo {
     bool use_relative_vertical = false;
     SCDateTime date_time{};
@@ -178,8 +170,20 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     bool multi_line = false;
   };
 
+  const std::size_t zone_count = (instrument.zone_long.has_value() ? 1u : 0u) +
+                                 (instrument.zone_short.has_value() ? 1u : 0u);
+
+  std::vector<const core::Zone*> zones;
+  zones.reserve(zone_count);
+  if (instrument.zone_long.has_value()) {
+    zones.push_back(&instrument.zone_long.value());
+  }
+  if (instrument.zone_short.has_value()) {
+    zones.push_back(&instrument.zone_short.value());
+  }
+
   std::vector<LabelInfo> labels;
-  labels.reserve(instrument.zones.size() * 4 + 6);
+  labels.reserve(zone_count * 4 + 6);
 
   const double start_time_value = start_time.GetAsDouble();
   const double end_time_value = end_time.GetAsDouble();
@@ -190,14 +194,14 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
   const COLORREF flip_color = RGB(138, 43, 226);
   const COLORREF flip_text_color = RGB(255, 255, 255);
 
-  // Invalid overlays (lowest z-order).
-  for (const auto& zone : instrument.zones) {
-    if (!zone.invalid.has_value()) {
+  // Invalidation overlays (lowest z-order).
+  for (const auto* zone : zones) {
+    if (!zone->invalidation.has_value()) {
       continue;
     }
 
-    const double high = round_to_tick(zone.invalid->high);
-    const double low = round_to_tick(zone.invalid->low);
+    const double high = round_to_tick(zone->invalidation->high);
+    const double low = round_to_tick(zone->invalidation->low);
     if (high <= low) {
       continue;
     }
@@ -215,24 +219,12 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     rect.ExtendRight = 1;
     rect.ExtendLeft = 0;
     register_tool(rect);
-
-    if (auto note = find_note(zone, "invalid")) {
-      LabelInfo label;
-      label.date_time = start_time;
-      label.price = static_cast<float>(high);
-      label.text = *note;
-      label.alignment = DT_LEFT | DT_TOP;
-      label.color = invalid_color;
-      label.font_size = 8;
-      label.multi_line = true;
-      labels.push_back(std::move(label));
-    }
   }
 
-  // Zones (primary rectangles).
-  for (const auto& zone : instrument.zones) {
-    const double high = round_to_tick(zone.range.high);
-    const double low = round_to_tick(zone.range.low);
+  // Primary zone rectangles with captions.
+  for (const auto* zone : zones) {
+    const double high = round_to_tick(zone->range.high);
+    const double low = round_to_tick(zone->range.low);
     if (high <= low) {
       continue;
     }
@@ -243,7 +235,7 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     rect.EndDateTime = end_time;
     rect.BeginValue = static_cast<float>(high);
     rect.EndValue = static_cast<float>(low);
-    rect.Color = GetZoneColor(zone.direction);
+    rect.Color = GetZoneColor(zone->direction);
     rect.SecondaryColor = rect.Color;
     rect.TransparencyLevel = 70;
     rect.LineWidth = 1;
@@ -251,18 +243,16 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     rect.ExtendLeft = 0;
     register_tool(rect);
 
-    if (auto range_note = find_note(zone, "range")) {
-      LabelInfo label;
-      label.date_time = zone_center_time;
-      label.price = static_cast<float>((high + low) * 0.5);
-      label.text = *range_note;
-      label.alignment = DT_CENTER | DT_VCENTER;
-      label.color = RGB(255, 255, 255);
-      label.font_size = 9;
-      label.bold = true;
-      label.multi_line = true;
-      labels.push_back(std::move(label));
-    }
+    LabelInfo label;
+    label.date_time = zone_center_time;
+    label.price = static_cast<float>((high + low) * 0.5);
+    label.text = zone->label;
+    label.alignment = DT_CENTER | DT_VCENTER;
+    label.color = RGB(255, 255, 255);
+    label.font_size = 9;
+    label.bold = true;
+    label.multi_line = true;
+    labels.push_back(std::move(label));
   }
 
   // Flip zone (optional).
@@ -298,17 +288,13 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     }
   }
 
-  const auto add_level = [&](const core::Zone& zone,
-                             double price,
-                             COLORREF color,
-                             const char* caption,
-                             const char* note_key) {
+  const auto add_level = [&](const core::Zone& zone, double price, COLORREF color, const char* caption) {
     const double adjusted = round_to_tick(price);
 
     auto line_tool = init_tool();
-    line_tool.DrawingType = DRAWING_HORIZONTALLINE;
+    line_tool.DrawingType = DRAWING_HORIZONTAL_RAY;
     line_tool.BeginDateTime = start_time;
-    line_tool.EndDateTime = start_time;
+    line_tool.EndDateTime = start_time + (1.0 / (24.0 * 60.0 * 60.0));
     line_tool.BeginValue = static_cast<float>(adjusted);
     line_tool.EndValue = static_cast<float>(adjusted);
     line_tool.Color = color;
@@ -325,20 +311,14 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     label.color = color;
     label.font_size = kLevelFontSize;
     label.bold = kLevelFontBold;
-
-    std::string text = std::string(caption) + ": " + format_price(adjusted);
-    if (auto note = find_note(zone, note_key)) {
-      text.append(" - ");
-      text.append(*note);
-    }
-    label.text = std::move(text);
+    label.text = std::string(caption) + ": " + format_price(adjusted);
     labels.push_back(std::move(label));
   };
 
-  for (const auto& zone : instrument.zones) {
-    add_level(zone, zone.sl, RGB(220, 20, 60), "SL", "sl");
-    add_level(zone, zone.tp1, RGB(50, 205, 50), "TP1", "tp1");
-    add_level(zone, zone.tp2, RGB(0, 128, 0), "TP2", "tp2");
+  for (const auto* zone : zones) {
+    add_level(*zone, zone->sl, RGB(220, 20, 60), "SL");
+    add_level(*zone, zone->tp1, RGB(50, 205, 50), "TP1");
+    add_level(*zone, zone->tp2, RGB(0, 128, 0), "TP2");
   }
 
   // Marker label (rendered after other labels, before vertical line).
@@ -376,9 +356,7 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     text_tool.Text = label.text.c_str();
     text_tool.EndValue = text_tool.BeginValue;
     register_tool(text_tool);
-  }
-
-  auto marker = init_tool();
+  }  auto marker = init_tool();
   marker.DrawingType = DRAWING_VERTICALLINE;
   marker.BeginDateTime = start_time;
   marker.EndDateTime = start_time;
@@ -388,3 +366,4 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
 }
 
 }  // namespace sierra::acsil
+

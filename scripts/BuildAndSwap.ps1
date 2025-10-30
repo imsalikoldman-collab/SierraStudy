@@ -57,6 +57,41 @@ $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptRoot '..')
+
+function Copy-TestFilesToSierra {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$SierraDataDir
+  )
+
+  $sourceDir = Join-Path $RepoRoot 'test_files'
+  if (-not (Test-Path -LiteralPath $sourceDir)) {
+    Write-Verbose "[test-files] Source directory not found: $sourceDir. Skipping copy."
+    return
+  }
+
+  $destinationDir = Join-Path $SierraDataDir 'test_files'
+  if (-not (Test-Path -LiteralPath $destinationDir)) {
+    Write-Host "[test-files] Creating directory $destinationDir"
+    New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+  }
+
+  Write-Host "[test-files] Copying test plans to $destinationDir"
+  Copy-Item -Path (Join-Path $sourceDir '*') -Destination $destinationDir -Recurse -Force
+
+  $sourceFiles = Get-ChildItem -Path $sourceDir -File -Recurse
+  foreach ($file in $sourceFiles) {
+    $relative = $file.FullName.Substring($sourceDir.Length).TrimStart('\', '/')
+    $targetFile = Join-Path $destinationDir $relative
+    if (-not (Test-Path -LiteralPath $targetFile)) {
+      throw "[test-files] Verification failed: $targetFile was not created."
+    }
+  }
+  Write-Host "[test-files] Copy verification passed."
+}
+
 Push-Location $repoRoot
 try {
   $gitCmd = Get-Command git -ErrorAction SilentlyContinue
@@ -123,6 +158,8 @@ if (-not $NoHotSwap) {
   }
 
   if (-not [string]::IsNullOrWhiteSpace($SierraDataDir)) {
+    Copy-TestFilesToSierra -RepoRoot $repoRoot -SierraDataDir $SierraDataDir
+
     & pwsh -NoProfile -File $hotSwapScript `
       -Dll $wrapperDll `
       -SierraDataDir $SierraDataDir `

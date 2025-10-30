@@ -21,16 +21,21 @@ TEST(YamlPlanLoaderTest, LoadsValidPlan) {
   const auto nq_it = plan.instruments.find("NQ");
   ASSERT_NE(nq_it, plan.instruments.end());
   const auto& nq = nq_it->second;
-  ASSERT_EQ(nq.zones.size(), 1u);
-  const auto& zone = nq.zones.front();
+  ASSERT_TRUE(nq.zone_long.has_value());
+  const auto& zone = nq.zone_long.value();
   EXPECT_EQ(zone.direction, sierra::core::ZoneDirection::kBuy);
+  EXPECT_EQ(zone.label, "NQ long 24500-24900");
   EXPECT_DOUBLE_EQ(zone.range.low, 24500.0);
+  ASSERT_TRUE(zone.invalidation.has_value());
+  EXPECT_DOUBLE_EQ(zone.invalidation->low, 24300.0);
   EXPECT_TRUE(nq.flip.has_value());
   EXPECT_DOUBLE_EQ(nq.flip->range.low, 24700.0);
+  EXPECT_EQ(nq.flip->label, "Bias change");
 
   const auto es_it = plan.instruments.find("ES");
   ASSERT_NE(es_it, plan.instruments.end());
-  EXPECT_TRUE(es_it->second.zones.empty());
+  EXPECT_FALSE(es_it->second.zone_long.has_value());
+  EXPECT_FALSE(es_it->second.zone_short.has_value());
   EXPECT_FALSE(es_it->second.flip.has_value());
 }
 
@@ -48,14 +53,13 @@ TEST(YamlPlanLoaderTest, ReportsMissingFile) {
 
 /**
  * @brief Проверяет обработку некорректной структуры YAML.
- * @note Отсутствует обязательное поле direction у зоны.
+ * @note Отсутствует обязательное поле label у zone_long.
  * @warning Ошибка должна содержать идентификатор проблемного инструмента.
  */
 TEST(YamlPlanLoaderTest, ReportsInvalidStructure) {
   const auto path = std::filesystem::current_path() / "projects" / "Tests" / "data" /
-                    "invalid_plan_missing_direction.yaml";
+                    "invalid_plan_missing_label.yaml";
   const auto result = sierra::core::LoadStudyPlanFromFile(path);
   EXPECT_FALSE(result.success());
-  EXPECT_NE(result.error_message.find("direction"), std::string::npos);
+  EXPECT_NE(result.error_message.find("label"), std::string::npos);
 }
-

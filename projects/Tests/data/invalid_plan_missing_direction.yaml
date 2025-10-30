@@ -1,9 +1,0 @@
-v: "1.5-min-obj"
-generated_at: "2025-10-24T06:45:00Z"
-
-NQ:
-  zones:
-    - range: [100.0, 200.0]
-      sl: 90.0
-      tp1: 210.0
-      tp2: 220.0

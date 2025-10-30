@@ -56,29 +56,30 @@ TEST(RapidYamlSpecTest, ParsesRootObjectWithZonesAndFlip) {
   constexpr const char* kYaml = R"(v: 1.5-min-obj
 generated_at: 2025-10-23T08:45:00Z
 NQ:
-  zones:
-    - direction: buy
-      range: [15420.25, 15435.00]
-      sl: 15410.00
-      tp1: 15455.00
-      tp2: 15480.00
-      notes:
-        range: "Основной диапазон NQ"
-    - direction: sell
-      range: [15550.00, 15570.50]
-      sl: 15580.00
-      tp1: 15520.00
-      tp2: 15495.00
+  zone_long:
+    label: "NQ buy zone"
+    range: [15420.25, 15435.00]
+    sl: 15410.00
+    tp1: 15455.00
+    tp2: 15480.00
+    invalidation: [15418.00, 15419.00]
+  zone_short:
+    label: "NQ sell zone"
+    range: [15550.00, 15570.50]
+    sl: 15580.00
+    tp1: 15520.00
+    tp2: 15495.00
   flip:
     range: [15500.00, 15520.00]
-    label: "NQ Flip"
+    label: "Bias change"
 ES:
-  zones:
-    - direction: buy
-      range: [4300.00, 4308.00]
-      sl: 4295.00
-      tp1: 4315.00
-      tp2: 4325.00
+  zone_long: null
+  zone_short:
+    label: "ES short zone"
+    range: [4300.00, 4308.00]
+    sl: 4295.00
+    tp1: 4315.00
+    tp2: 4325.00
 )";
 
   ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(kYaml));
@@ -91,26 +92,32 @@ ES:
 
   ASSERT_TRUE(root.has_child("NQ"));
   const auto nq = root["NQ"];
-  ASSERT_TRUE(nq.has_child("zones"));
-  const auto nqZones = nq["zones"];
-  ASSERT_EQ(nqZones.num_children(), 2u);
+  ASSERT_TRUE(nq.has_child("zone_long"));
+  const auto nqZoneLong = nq["zone_long"];
+  EXPECT_EQ(nqZoneLong["label"].val(), ryml::to_csubstr("NQ buy zone"));
+  const auto nqRangeLong = nqZoneLong["range"];
+  ASSERT_EQ(nqRangeLong.num_children(), 2u);
+  EXPECT_NEAR(NodeToDouble(nqRangeLong.child(0)), 15420.25, 1e-6);
+  EXPECT_NEAR(NodeToDouble(nqRangeLong.child(1)), 15435.00, 1e-6);
+  ASSERT_TRUE(nqZoneLong.has_child("invalidation"));
+  const auto invalidation = nqZoneLong["invalidation"];
+  EXPECT_NEAR(NodeToDouble(invalidation.child(0)), 15418.00, 1e-6);
 
-  const auto nqZone0 = nqZones.child(0);
-  EXPECT_EQ(nqZone0["direction"].val(), ryml::to_csubstr("buy"));
-  const auto nqRange0 = nqZone0["range"];
-  ASSERT_EQ(nqRange0.num_children(), 2u);
-  EXPECT_NEAR(NodeToDouble(nqRange0.child(0)), 15420.25, 1e-6);
-  EXPECT_NEAR(NodeToDouble(nqRange0.child(1)), 15435.00, 1e-6);
+  ASSERT_TRUE(nq.has_child("zone_short"));
+  const auto nqZoneShort = nq["zone_short"];
+  EXPECT_EQ(nqZoneShort["label"].val(), ryml::to_csubstr("NQ sell zone"));
+  EXPECT_FALSE(nqZoneShort.has_child("invalidation"));
 
   const auto nqFlip = nq["flip"];
   ASSERT_TRUE(!nqFlip.is_seed());
-  EXPECT_EQ(nqFlip["label"].val(), ryml::to_csubstr("NQ Flip"));
+  EXPECT_EQ(nqFlip["label"].val(), ryml::to_csubstr("Bias change"));
 
   ASSERT_TRUE(root.has_child("ES"));
   const auto es = root["ES"];
-  const auto esZone0 = es["zones"].child(0);
-  EXPECT_EQ(esZone0["direction"].val(), ryml::to_csubstr("buy"));
-  EXPECT_NEAR(NodeToDouble(esZone0["tp2"]), 4325.00, 1e-6);
+  ASSERT_TRUE(es.has_child("zone_short"));
+  const auto esShort = es["zone_short"];
+  EXPECT_EQ(esShort["label"].val(), ryml::to_csubstr("ES short zone"));
+  EXPECT_NEAR(NodeToDouble(esShort["tp2"]), 4325.00, 1e-6);
 }
 
 /**
@@ -120,43 +127,36 @@ ES:
  * @note Демонстрирует корректную работу с отсутствующими ключами и проверяет числовые диапазоны.
  * @warning При изменении формата чисел потребуется скорректировать допуски в проверках.
  */
-TEST(RapidYamlSpecTest, HandlesOptionalInvalidRangesAndNotes) {
-  constexpr const char* kYaml = R"(zones:
-  - direction: sell
-    range: [100.0, 120.5]
-    sl: 125.0
-    tp1: 95.0
-    tp2: 90.0
-    invalid: [118.0, 119.0]
-    notes:
-      invalid: "пересмотр 119.0"
-  - direction: buy
-    range: [80.0, 92.0]
-    sl: 75.0
-    tp1: 100.0
-    tp2: 110.0
+TEST(RapidYamlSpecTest, HandlesOptionalInvalidation) {
+  constexpr const char* kYaml = R"(zone_long:
+  label: "Sell control"
+  range: [100.0, 120.5]
+  sl: 125.0
+  tp1: 95.0
+  tp2: 90.0
+  invalidation: [118.0, 119.0]
+zone_short:
+  label: "Buy setup"
+  range: [80.0, 92.0]
+  sl: 75.0
+  tp1: 100.0
+  tp2: 110.0
 )";
 
   ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(kYaml));
   const auto root = tree.rootref();
   ASSERT_TRUE(root.readable());
-  const auto zones = root["zones"];
-  ASSERT_EQ(zones.num_children(), 2u);
 
-  const auto sellZone = zones.child(0);
-  ASSERT_TRUE(sellZone.has_child("invalid"));
-  const auto invalidRange = sellZone["invalid"];
-  ASSERT_EQ(invalidRange.num_children(), 2u);
-  EXPECT_NEAR(NodeToDouble(invalidRange.child(0)), 118.0, 1e-6);
-  EXPECT_NEAR(NodeToDouble(invalidRange.child(1)), 119.0, 1e-6);
-  ASSERT_TRUE(sellZone.has_child("notes"));
-  EXPECT_EQ(sellZone["notes"]["invalid"].val(), ryml::to_csubstr("пересмотр 119.0"));
+  const auto zoneLong = root["zone_long"];
+  ASSERT_TRUE(zoneLong.has_child("invalidation"));
+  const auto invalidation = zoneLong["invalidation"];
+  ASSERT_EQ(invalidation.num_children(), 2u);
+  EXPECT_NEAR(NodeToDouble(invalidation.child(0)), 118.0, 1e-6);
+  EXPECT_NEAR(NodeToDouble(invalidation.child(1)), 119.0, 1e-6);
 
-  const auto buyZone = zones.child(1);
-  EXPECT_FALSE(buyZone.has_child("invalid"));
-  EXPECT_FALSE(buyZone.has_child("notes"));
-  const auto buyRange = buyZone["range"];
-  EXPECT_NEAR(NodeToDouble(buyRange.child(0)), 80.0, 1e-6);
-  EXPECT_NEAR(NodeToDouble(buyRange.child(1)), 92.0, 1e-6);
+  const auto zoneShort = root["zone_short"];
+  EXPECT_FALSE(zoneShort.has_child("invalidation"));
+  const auto rangeShort = zoneShort["range"];
+  EXPECT_NEAR(NodeToDouble(rangeShort.child(0)), 80.0, 1e-6);
+  EXPECT_NEAR(NodeToDouble(rangeShort.child(1)), 92.0, 1e-6);
 }
-

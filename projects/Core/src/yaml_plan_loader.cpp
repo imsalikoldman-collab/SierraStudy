@@ -51,47 +51,22 @@ bool ParsePriceRangeNode(ryml::ConstNodeRef node, PriceRange* out, std::string* 
   return true;
 }
 
-bool ParseDirection(ryml::ConstNodeRef node, ZoneDirection* out, std::string* error) {
-  const auto text = ToString(node);
-  if (text == "buy") {
-    *out = ZoneDirection::kBuy;
-    return true;
-  }
-  if (text == "sell") {
-    *out = ZoneDirection::kSell;
-    return true;
-  }
-  *error = "Поле direction должно принимать значения \"buy\" или \"sell\"";
-  return false;
-}
-
-bool ParseNotes(ryml::ConstNodeRef node, std::unordered_map<std::string, std::string>* out) {
+bool ParseZone(ryml::ConstNodeRef node,
+               ZoneDirection direction,
+               Zone* out,
+               std::string* error) {
   if (!node.is_map()) {
-    return false;
-  }
-  out->clear();
-  for (const auto& child : node.children()) {
-    const auto key = std::string(child.key().str, child.key().len);
-    out->emplace(key, std::string(child.val().str, child.val().len));
-  }
-  return true;
-}
-
-bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
-  if (!node.is_map()) {
-    *error = "Элемент зоны должен быть YAML-картой";
+    *error = "Элемент zone_long/zone_short должен быть YAML-картой";
     return false;
   }
 
-  const auto direction_node = node.find_child("direction");
-  if (!direction_node.readable()) {
-    *error = "Отсутствует обязательное поле direction";
+  const auto label_node = node.find_child("label");
+  if (!label_node.readable()) {
+    *error = "Отсутствует обязательное поле label";
     return false;
   }
-  if (!ParseDirection(direction_node, &out->direction, error)) {
-    return false;
-  }
-
+  out->direction = direction;
+  out->label = ToString(label_node);
   const auto range_node = node.find_child("range");
   if (!range_node.readable()) {
     *error = "Отсутствует обязательное поле range";
@@ -117,23 +92,14 @@ bool ParseZone(ryml::ConstNodeRef node, Zone* out, std::string* error) {
   if (!ParseDouble(tp2_node, &out->tp2, error)) {
     return false;
   }
-
-  out->invalid.reset();
-  const auto invalid_node = node.find_child("invalid");
-  if (invalid_node.readable()) {
-    PriceRange invalid{};
-    if (!ParsePriceRangeNode(invalid_node, &invalid, error)) {
+  out->invalidation.reset();
+  if (const auto invalid_node = node.find_child("invalidation"); invalid_node.readable()) {
+    PriceRange range{};
+    if (!ParsePriceRangeNode(invalid_node, &range, error)) {
       return false;
     }
-    out->invalid = invalid;
+    out->invalidation = range;
   }
-
-  out->notes.clear();
-  const auto notes_node = node.find_child("notes");
-  if (notes_node.readable()) {
-    ParseNotes(notes_node, &out->notes);
-  }
-
   return true;
 }
 
@@ -168,23 +134,25 @@ bool ParseInstrument(ryml::ConstNodeRef node, InstrumentPlan* out, std::string* 
     return false;
   }
 
-  out->zones.clear();
-  if (auto zones_node = node.find_child("zones"); zones_node.readable()) {
-    if (zones_node.has_val() && zones_node.val_is_null()) {
-      // ????????????? null ??? ???????? ?????.
-    } else {
-      if (!zones_node.is_seq()) {
-        *error = "???? zones ?????? ???? ???????????????????";
+  out->zone_long.reset();
+  if (auto zone_long_node = node.find_child("zone_long"); zone_long_node.readable()) {
+    if (!(zone_long_node.has_val() && zone_long_node.val_is_null())) {
+      Zone zone{};
+      if (!ParseZone(zone_long_node, ZoneDirection::kBuy, &zone, error)) {
         return false;
       }
-      out->zones.reserve(static_cast<std::size_t>(zones_node.num_children()));
-      for (const auto& zone_node : zones_node.children()) {
-        Zone zone{};
-        if (!ParseZone(zone_node, &zone, error)) {
-          return false;
-        }
-        out->zones.push_back(std::move(zone));
+      out->zone_long = std::move(zone);
+    }
+  }
+
+  out->zone_short.reset();
+  if (auto zone_short_node = node.find_child("zone_short"); zone_short_node.readable()) {
+    if (!(zone_short_node.has_val() && zone_short_node.val_is_null())) {
+      Zone zone{};
+      if (!ParseZone(zone_short_node, ZoneDirection::kSell, &zone, error)) {
+        return false;
       }
+      out->zone_short = std::move(zone);
     }
   }
 
@@ -272,4 +240,3 @@ PlanLoadResult LoadStudyPlanFromFile(const std::filesystem::path& path) {
 }
 
 }  // namespace sierra::core
-

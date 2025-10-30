@@ -168,15 +168,27 @@ Copy-Item -Force $Dll $dst
 Write-Host "[hot-swap] Обновлено: $dst"
 ```
 
-`scripts/BuildAndSwap.ps1`:
+`scripts/BuildAndSwap.ps1` (фрагмент):
 ```powershell
-param([ValidateSet('Debug','Release')]$Configuration='Debug')
-$ErrorActionPreference='Stop'
-
-& msbuild.exe "$PSScriptRoot\..\SierraStudy.sln" /m /p:Configuration=$Configuration /p:Platform=x64
-& "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Tests.exe" --gtest_color=yes
-& pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Wrapper.dll" -SierraDataDir $env:SIERRA_DATA_DIR
+# ...
+Copy-TestFilesToSierra -RepoRoot $repoRoot -SierraDataDir $SierraDataDir
+& pwsh -NoProfile -File $hotSwapScript `
+  -Dll $wrapperDll `
+  -SierraDataDir $SierraDataDir `
+  -UseRemoteRelease:$RemoteHotSwap `
+  -AutoRemoteFallback:(!$DisableRemoteFallback)
+# ...
 ```
+> Перед запуском HotSwap скрипт копирует содержимое `test_files` в `$SierraDataDir\test_files` и проверяет, что каждый файл был записан успешно.
+
+`go.ps1` (корневая оболочка Debug → Test → Hot-Swap):
+```powershell
+Copy-TestFiles -RepoRoot $PSScriptRoot -DestinationRoot $env:SIERRA_DATA_DIR
+pwsh -NoProfile -File "$PSScriptRoot\scripts\HotSwap.ps1" `
+  -Dll "$PSScriptRoot\out\x64\Debug\SierraStudy.dll" `
+  -SierraDataDir $env:SIERRA_DATA_DIR -AutoRemoteFallback
+```
+> Корневой `go.ps1` также копирует `test_files` в `$SIERRA_DATA_DIR\test_files` и валидирует результат.
 
 ---
 
@@ -221,5 +233,5 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 
 ## 11) Ежедневный цикл (коротко)
 1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **Commit/Push**.  
-Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`.
+Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `logs/SierraStudy.log`.
 

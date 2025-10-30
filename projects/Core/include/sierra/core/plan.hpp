@@ -23,23 +23,25 @@ struct PriceRange {
 enum class ZoneDirection { kBuy, kSell };
 
 /**
- * @brief Описывает торговую зону из плана.
- * @param direction Направление зоны (покупка/продажа).
- * @param range Основной рабочий диапазон цен.
+ * @brief Торговая зона, импортированная из YAML плана.
+ * @param direction Тип зоны: покупка (`zone_long`) или продажа (`zone_short`).
+ * @param label Обязательное текстовое описание, выводимое внутри зоны.
+ * @param range Основной диапазон цен [low, high], в котором действует зона.
  * @param sl Уровень стоп-лосса.
  * @param tp1 Первый тейк-профит.
  * @param tp2 Второй тейк-профит.
- * @param invalid Дополнительный диапазон инвалидации, если указан.
- * @param notes Свободные текстовые пометки по ключам (range/sl/tp1/tp2/invalid).
+ * @param invalidation Необязательный диапазон инвалидации.
+ * @note Структура не содержит произвольных заметок: всё, что нужно для отображения, перечислено явно.
+ * @warning При отсутствии `label` или диапазона `range` парсер отклоняет зону.
  */
 struct Zone {
   ZoneDirection direction{};
+  std::string label;
   PriceRange range{};
   double sl{};
   double tp1{};
   double tp2{};
-  std::optional<PriceRange> invalid;
-  std::unordered_map<std::string, std::string> notes;
+  std::optional<PriceRange> invalidation;
 };
 
 /**
@@ -53,12 +55,16 @@ struct FlipZone {
 };
 
 /**
- * @brief План для конкретного тикера.
- * @param zones Набор торговых зон.
- * @param flip Опциональный flip-блок.
+ * @brief План для одного тикера.
+ * @param zone_long Опциональная покупочная зона `zone_long`.
+ * @param zone_short Опциональная продажная зона `zone_short`.
+ * @param flip Необязательная flip-зона для смены сценария.
+ * @note На тикер приходится максимум одна зона каждого типа.
+ * @warning Оба поля `zone_long` и `zone_short` могут быть пустыми одновременно.
  */
 struct InstrumentPlan {
-  std::vector<Zone> zones;
+  std::optional<Zone> zone_long;
+  std::optional<Zone> zone_short;
   std::optional<FlipZone> flip;
 };
 

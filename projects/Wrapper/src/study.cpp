@@ -356,7 +356,8 @@ void UpdatePlanWatcher(SCStudyGraphRef sc,
   std::size_t total_zones = 0;
   std::size_t total_flips = 0;
   for (const auto& [ticker, instrument] : state->plan->instruments) {
-    total_zones += instrument.zones.size();
+    if (instrument.zone_long.has_value()) ++total_zones;
+    if (instrument.zone_short.has_value()) ++total_zones;
     if (instrument.flip.has_value()) {
       ++total_flips;
     }
@@ -366,7 +367,8 @@ void UpdatePlanWatcher(SCStudyGraphRef sc,
   parsed_msg << "[plan] YAML parsed: OK (version=" << state->plan->version << ", generated_at="
              << state->plan->generated_at_iso8601 << ", instruments=" << state->plan->instruments.size()
              << ", zones=" << total_zones << ", flips=" << total_flips << ")";
-  const std::string new_text = sierra::core::FormatPlanAsTable(*state->plan);
+  const std::string new_text =
+      sierra::core::FormatPlanAsTable(*state->plan, std::string(sc.Symbol.GetChars()));
   if (state->rendered_text != new_text) {
     state->rendered_text = new_text;
     state->dirty = true;
@@ -577,6 +579,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
                                    : static_cast<float>(value);
 }
+
 
 
 
