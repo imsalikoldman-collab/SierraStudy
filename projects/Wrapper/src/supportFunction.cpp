@@ -270,7 +270,8 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
                                   SCDateTime start_time,
                                   SCDateTime end_time,
                                   std::vector<int>& line_numbers,
-                                  const std::string& generated_at_iso8601) {
+                                  const std::string& generated_at_iso8601,
+                                  const MarkerLineStyle& marker_style) {
   DeleteExistingDrawings(sc, line_numbers);
 
   const double tick_size = sc.TickSize > 0.0 ? sc.TickSize : 0.25;
@@ -508,8 +509,9 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
   marker.DrawingType = DRAWING_VERTICALLINE;
   marker.BeginDateTime = start_time;
   marker.EndDateTime = start_time;
-  marker.Color = RGB(255, 204, 0);
-  marker.LineWidth = 2;
+  marker.Color = marker_style.color;
+  marker.LineWidth = marker_style.width <= 0 ? 1 : marker_style.width;
+  marker.LineStyle = marker_style.style;
   register_tool(marker);
 }
 

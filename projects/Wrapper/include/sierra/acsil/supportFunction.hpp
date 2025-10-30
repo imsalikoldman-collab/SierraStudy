@@ -29,6 +29,18 @@ void LogDllStartup(SCStudyInterfaceRef sc);
 SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fallback);
 
 /**
+ * @brief Описывает стиль вертикальной линии маркера `generated_at`.
+ * @param color Цвет линии.
+ * @param width Толщина линии (пиксели).
+ * @param style Тип линии (значение SubgraphLineStyles).
+ */
+struct MarkerLineStyle {
+  COLORREF color{};
+  int width{};
+  SubgraphLineStyles style{};
+};
+
+/**
  * @brief Рисует автономную тестовую горизонтальную линию.
  * @param sc Контекст Sierra Chart.
  * @param existing_line_number Существующий LineNumber (если линия уже создана).
@@ -54,6 +66,7 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
                                   SCDateTime start_time,
                                   SCDateTime end_time,
                                   std::vector<int>& line_numbers,
-                                  const std::string& generated_at_iso8601);
+                                  const std::string& generated_at_iso8601,
+                                  const MarkerLineStyle& marker_style);
 
 }  // namespace sierra::acsil

@@ -7,6 +7,7 @@
 #include "sierra/core/yaml_plan_loader.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -35,6 +36,8 @@ constexpr int kPersistDebugLine = 3;
 constexpr double kDefaultPlanCheckIntervalSeconds = 15.0;
 constexpr double kMinPlanCheckIntervalSeconds = 1.0;
 constexpr double kSecondsPerDay = 24.0 * 60.0 * 60.0;
+constexpr std::array<SubgraphLineStyles, 5> kLineStyleOptions = {
+    LINESTYLE_SOLID, LINESTYLE_DASH, LINESTYLE_DOT, LINESTYLE_DASHDOT, LINESTYLE_DASHDOTDOT};
 
 /**
  * @brief Хранит кеш плана и состояние слежения за YAML-файлом.
@@ -379,10 +382,6 @@ void UpdatePlanWatcher(SCStudyGraphRef sc,
 }
 
 void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
-  if (!state.dirty) {
-    return;
-  }
-
   s_UseTool tool;
   tool.Clear();
   tool.ChartNumber = sc.ChartNumber;
@@ -397,7 +396,11 @@ void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
   tool.TransparencyLevel = 0;
   tool.AddAsUserDrawnDrawing = 0;
   tool.UseRelativeVerticalValues = 1;
-  tool.BeginDateTime = 2.0;
+  if (sc.ArraySize > 0) {
+    tool.BeginDateTime = sc.BaseDateTimeIn[sc.ArraySize - 1];
+  } else {
+    tool.BeginDateTime = sc.CurrentSystemDateTime;
+  }
   tool.BeginValue = 97.0f;
   tool.EndValue = tool.BeginValue;
 
@@ -413,7 +416,6 @@ void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
 
   sc.UseTool(tool);
   state.table_line_number = tool.LineNumber;
-  state.dirty = false;
 }
 
 const sierra::core::InstrumentPlan* FindInstrumentPlanForSymbol(SCStudyGraphRef sc,
@@ -442,21 +444,17 @@ const sierra::core::InstrumentPlan* FindInstrumentPlanForSymbol(SCStudyGraphRef 
   return best_match != nullptr ? best_match : fallback;
 }
 
-void RenderPlanGraphics(SCStudyGraphRef sc, PlanWatcherState& state) {
-  if (!state.graphics_dirty) {
-    return;
-  }
-
+void RenderPlanGraphics(SCStudyGraphRef sc,
+                        PlanWatcherState& state,
+                        const sierra::acsil::MarkerLineStyle& marker_style) {
   if (state.plan == nullptr || sc.ArraySize <= 0) {
     ClearPlanDrawings(sc, state);
-    state.graphics_dirty = false;
     return;
   }
 
   const auto* instrument = FindInstrumentPlanForSymbol(sc, *state.plan);
   if (instrument == nullptr) {
     ClearPlanDrawings(sc, state);
-    state.graphics_dirty = false;
     return;
   }
 
@@ -477,8 +475,7 @@ void RenderPlanGraphics(SCStudyGraphRef sc, PlanWatcherState& state) {
 
   sierra::acsil::RenderInstrumentPlanGraphics(sc, *instrument, start_time, end_time,
                                               state.plan_drawing_line_numbers,
-                                              state.plan->generated_at_iso8601);
-  state.graphics_dirty = false;
+                                              state.plan->generated_at_iso8601, marker_style);
 }
 
 }  // namespace
@@ -495,6 +492,9 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   SCInputRef planDirectoryInput = sc.Input[1];
   SCInputRef planFileNameInput = sc.Input[2];
   SCInputRef planPollIntervalInput = sc.Input[3];
+  SCInputRef markerColorInput = sc.Input[4];
+  SCInputRef markerWidthInput = sc.Input[5];
+  SCInputRef markerStyleInput = sc.Input[6];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - Moving Average";
@@ -515,7 +515,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     periodInput.SetIntLimits(1, 500);
 
     planDirectoryInput.Name = "Plan Directory";
-    planDirectoryInput.SetString("");
+    planDirectoryInput.SetString("C:\\2308\\Data\\test_files");
 
     planFileNameInput.Name = "Plan File Name";
     planFileNameInput.SetString("nq_intraday_flip_example.yaml");
@@ -524,17 +524,39 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     planPollIntervalInput.SetFloat(static_cast<float>(kDefaultPlanCheckIntervalSeconds));
     planPollIntervalInput.SetFloatLimits(static_cast<float>(kMinPlanCheckIntervalSeconds), 600.0f);
 
+    markerColorInput.Name = "Generated Marker Color";
+    markerColorInput.SetColor(RGB(255, 165, 0));
+
+    markerWidthInput.Name = "Generated Marker Line Width";
+    markerWidthInput.SetInt(1);
+    markerWidthInput.SetIntLimits(1, 10);
+
+    markerStyleInput.Name = "Generated Marker Line Style";
+    markerStyleInput.SetCustomInputStrings("Solid;Dash;Dot;DashDot;DashDotDot");
+    markerStyleInput.SetCustomInputIndex(2);  // Dot by default.
+
     sc.DataStartIndex = periodInput.GetInt() - 1;
     return;
   }
 
+  const auto make_marker_style = [&]() -> sierra::acsil::MarkerLineStyle {
+    int style_index = markerStyleInput.GetIndex();
+    if (style_index < 0 || style_index >= static_cast<int>(kLineStyleOptions.size())) {
+      style_index = 2;
+    }
+    sierra::acsil::MarkerLineStyle style{};
+    style.color = markerColorInput.GetColor();
+    style.width = (std::max)(1, markerWidthInput.GetInt());
+    style.style = kLineStyleOptions[static_cast<std::size_t>(style_index)];
+    return style;
+  };
+
   if (sc.LastCallToFunction) {
     if (auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState))) {
+      const auto marker_style = make_marker_style();
       state->rendered_text.clear();
-      state->dirty = true;
       RenderPlanTable(sc, *state);
-      state->graphics_dirty = true;
-      RenderPlanGraphics(sc, *state);
+      RenderPlanGraphics(sc, *state, marker_style);
     }
     const int debug_line = sc.GetPersistentInt(kPersistDebugLine);
     if (debug_line != 0) {
@@ -564,8 +586,9 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   const double poll_interval = static_cast<double>(planPollIntervalInput.GetFloat());
 
   UpdatePlanWatcher(sc, state, plan_directory, plan_file_name, poll_interval);
+  const auto marker_style = make_marker_style();
   RenderPlanTable(sc, *state);
-  RenderPlanGraphics(sc, *state);
+  RenderPlanGraphics(sc, *state, marker_style);
   int debug_line_number = sc.GetPersistentInt(kPersistDebugLine);
   debug_line_number = sierra::acsil::RenderStandaloneDebugLine(sc, debug_line_number);
   sc.SetPersistentInt(kPersistDebugLine, debug_line_number);
