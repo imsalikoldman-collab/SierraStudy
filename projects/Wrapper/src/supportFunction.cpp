@@ -17,7 +17,7 @@ constexpr uint16_t kLevelLineWidth = 1;
 constexpr const char* kLevelFontFace = "Consolas";
 constexpr int kLevelFontSize = 8;
 constexpr bool kLevelFontBold = false;
-constexpr UINT kLevelTextAlignment = DT_CENTER | DT_BOTTOM;
+constexpr UINT kLevelTextAlignment = DT_RIGHT | DT_BOTTOM;
 constexpr bool kEnableDebugTestLine = true;
 
 #if defined(_WIN32)
@@ -215,6 +215,9 @@ SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fal
   return result;
 }
 
+
+
+
 int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number) {
   if (!kEnableDebugTestLine) {
     return existing_line_number;
@@ -229,6 +232,7 @@ int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number) {
   tool.LineWidth = 2;
   tool.LineStyle = LINESTYLE_SOLID;
   tool.Color = RGB(255, 0, 0);
+
 
   if (existing_line_number != 0) {
     tool.LineNumber = existing_line_number;
@@ -435,7 +439,11 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     }
   }
 
-  const auto add_level = [&](const core::Zone& zone, double price, COLORREF color, const char* caption) {
+  // zone передаётся для совместимости сигнатуры; см. docs/WarningSuppressions.md.
+  const auto add_level = [&]( [[maybe_unused]] const core::Zone& zone,
+                              double price,
+                              COLORREF color,
+                              const char* caption) {
     const double adjusted = round_to_tick(price);
 
     auto line_tool = init_tool();
@@ -510,10 +518,10 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
   marker.BeginDateTime = start_time;
   marker.EndDateTime = start_time;
   marker.Color = marker_style.color;
-  marker.LineWidth = marker_style.width <= 0 ? 1 : marker_style.width;
+  marker.LineWidth =
+      static_cast<uint16_t>(marker_style.width <= 0 ? 1 : marker_style.width);
   marker.LineStyle = marker_style.style;
   register_tool(marker);
 }
 
 }  // namespace sierra::acsil
-
