@@ -382,6 +382,9 @@ void UpdatePlanWatcher(SCStudyGraphRef sc,
 }
 
 void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
+  constexpr int kLeftAnchor = 1;
+  constexpr float kTopAnchorPercent = 100.0f;
+
   s_UseTool tool;
   tool.Clear();
   tool.ChartNumber = sc.ChartNumber;
@@ -396,12 +399,8 @@ void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
   tool.TransparencyLevel = 0;
   tool.AddAsUserDrawnDrawing = 0;
   tool.UseRelativeVerticalValues = 1;
-  if (sc.ArraySize > 0) {
-    tool.BeginDateTime = sc.BaseDateTimeIn[sc.ArraySize - 1];
-  } else {
-    tool.BeginDateTime = sc.CurrentSystemDateTime;
-  }
-  tool.BeginValue = 97.0f;
+  tool.BeginDateTime = kLeftAnchor;
+  tool.BeginValue = kTopAnchorPercent;
   tool.EndValue = tool.BeginValue;
 
   if (state.table_line_number != 0) {
@@ -613,7 +612,6 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
                                    : static_cast<float>(value);
 }
-
 
 
 
