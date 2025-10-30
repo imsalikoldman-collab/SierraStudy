@@ -204,17 +204,15 @@ SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fal
     return fallback;
   }
 
-  static const __time64_t base_seconds = []() {
-    std::tm base{};
-    base.tm_year = 1899 - 1900;
-    base.tm_mon = 11;
-    base.tm_mday = 30;
-    base.tm_isdst = -1;
-    return _mkgmtime64(&base);
-  }();
+  std::tm ny_tm{};
+  if (!ToUtcTime(ny_seconds, &ny_tm)) {
+    return fallback;
+  }
 
-  const double seconds_delta = static_cast<double>(ny_seconds - base_seconds);
-  return seconds_delta / kSecondsPerDay;
+  SCDateTime result;
+  result.SetDateTimeYMDHMS(ny_tm.tm_year + 1900, ny_tm.tm_mon + 1, ny_tm.tm_mday, ny_tm.tm_hour,
+                           ny_tm.tm_min, ny_tm.tm_sec);
+  return result;
 }
 
 int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number) {
