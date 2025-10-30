@@ -19,6 +19,123 @@ constexpr int kLevelFontSize = 8;
 constexpr bool kLevelFontBold = false;
 constexpr UINT kLevelTextAlignment = DT_CENTER | DT_BOTTOM;
 
+#if defined(_WIN32)
+std::time_t MakeTimeUtc(std::tm tm) { return _mkgmtime64(&tm); }
+bool ToUtcTime(std::time_t value, std::tm* out) { return _gmtime64_s(out, &value) == 0; }
+#else
+std::time_t MakeTimeUtc(std::tm tm) { return timegm(&tm); }
+bool ToUtcTime(std::time_t value, std::tm* out) { return gmtime_r(&value, out) != nullptr; }
+#endif
+
+std::time_t FindNthSundayUtc(int year, int month_zero_based, int nth) {
+  std::tm tm{};
+  tm.tm_year = year - 1900;
+  tm.tm_mon = month_zero_based;
+  tm.tm_mday = 1;
+  tm.tm_hour = 0;
+  tm.tm_min = 0;
+  tm.tm_sec = 0;
+
+  std::time_t t = MakeTimeUtc(tm);
+  std::tm utc_tm{};
+  if (!ToUtcTime(t, &utc_tm)) {
+    return t;
+  }
+
+  const int days_to_first_sunday = (7 - utc_tm.tm_wday) % 7;
+  t += static_cast<std::time_t>(days_to_first_sunday) * 24 * 60 * 60;
+  t += static_cast<std::time_t>(nth - 1) * 7 * 24 * 60 * 60;
+  return t;
+}
+
+std::time_t EasternDstStartUtc(int year) {
+  return FindNthSundayUtc(year, 2, 2) + 7 * 60 * 60;  // Second Sunday in March, 07:00 UTC.
+}
+
+std::time_t EasternDstEndUtc(int year) {
+  return FindNthSundayUtc(year, 10, 1) + 6 * 60 * 60;  // First Sunday in November, 06:00 UTC.
+}
+
+bool TryParseIso8601ToNewYorkSeconds(const std::string& iso8601, std::time_t* ny_seconds) {
+  std::string value = iso8601;
+  if (!value.empty() && (value.back() == 'Z' || value.back() == 'z')) {
+    value.pop_back();
+  }
+
+  int tz_sign = 0;
+  int tz_hours = 0;
+  int tz_minutes = 0;
+  if (value.size() >= 6) {
+    const char sign = value[value.size() - 6];
+    if (sign == '+' || sign == '-') {
+      tz_sign = (sign == '+') ? 1 : -1;
+      const std::string hour_str = value.substr(value.size() - 5, 2);
+      const std::string minute_str = value.substr(value.size() - 2, 2);
+      try {
+        tz_hours = std::stoi(hour_str);
+        tz_minutes = std::stoi(minute_str);
+      } catch (...) {
+        return false;
+      }
+      value.resize(value.size() - 6);
+    }
+  }
+
+  std::tm tm_components{};
+  tm_components.tm_isdst = -1;
+  std::istringstream stream(value);
+  stream >> std::get_time(&tm_components, "%Y-%m-%dT%H:%M:%S");
+  if (stream.fail()) {
+    return false;
+  }
+
+  std::time_t parsed_seconds = MakeTimeUtc(tm_components);
+  if (parsed_seconds == static_cast<std::time_t>(-1)) {
+    return false;
+  }
+
+  if (tz_sign != 0) {
+    const int offset_seconds = (tz_hours * 60 + tz_minutes) * 60;
+    if (tz_sign > 0) {
+      parsed_seconds -= offset_seconds;
+    } else {
+      parsed_seconds += offset_seconds;
+    }
+  }
+
+  std::tm utc_tm{};
+  if (!ToUtcTime(parsed_seconds, &utc_tm)) {
+    return false;
+  }
+
+  const int year = utc_tm.tm_year + 1900;
+  const std::time_t dst_start = EasternDstStartUtc(year);
+  const std::time_t dst_end = EasternDstEndUtc(year);
+  const bool is_dst = parsed_seconds >= dst_start && parsed_seconds < dst_end;
+  const int offset_hours = is_dst ? -4 : -5;
+  *ny_seconds = parsed_seconds + offset_hours * 60 * 60;
+  return true;
+}
+
+std::string FormatIso8601AsNewYorkLabel(const std::string& iso8601) {
+  std::time_t ny_seconds{};
+  if (!TryParseIso8601ToNewYorkSeconds(iso8601, &ny_seconds)) {
+    return "Plan generated " + iso8601;
+  }
+
+  std::tm ny_tm{};
+  if (!ToUtcTime(ny_seconds, &ny_tm)) {
+    return "Plan generated " + iso8601;
+  }
+
+  std::ostringstream oss;
+  oss << "Plan generated " << std::setfill('0') << std::setw(4) << (ny_tm.tm_year + 1900) << "-"
+      << std::setw(2) << (ny_tm.tm_mon + 1) << "-" << std::setw(2) << ny_tm.tm_mday << " "
+      << std::setw(2) << ny_tm.tm_hour << ":" << std::setw(2) << ny_tm.tm_min << ":" << std::setw(2)
+      << ny_tm.tm_sec << " America/New_York";
+  return oss.str();
+}
+
 /**
  * @brief Удаляет ранее созданные графические объекты из текущего графика.
  * @param sc Ссылочный интерфейс Sierra Chart, предоставляющий доступ к графику.
@@ -73,25 +190,12 @@ void LogDllStartup(SCStudyInterfaceRef sc) {
  * @param iso8601 Временная метка в формате YYYY-MM-DDThh:mm:ssZ (с необязательной Z).
  * @param fallback Значение, которое будет использовано при ошибке разбора.
  * @return Значение SCDateTime, совместимое с Sierra Chart.
- * @note Использует std::get_time и _mkgmtime64 для преобразования в UTC.
+ * @note Все значения нормализуются к часовому поясу America/New_York с учётом DST.
  * @warning При ошибках парсинга функция молча возвращает fallback.
  */
 SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fallback) {
-  std::string value = iso8601;
-  if (!value.empty() && (value.back() == 'Z' || value.back() == 'z')) {
-    value.pop_back();
-  }
-
-  std::tm tm_components{};
-  tm_components.tm_isdst = -1;
-  std::istringstream stream(value);
-  stream >> std::get_time(&tm_components, "%Y-%m-%dT%H:%M:%S");
-  if (stream.fail()) {
-    return fallback;
-  }
-
-  const __time64_t parsed_seconds = _mkgmtime64(&tm_components);
-  if (parsed_seconds == -1) {
+  std::time_t ny_seconds{};
+  if (!TryParseIso8601ToNewYorkSeconds(iso8601, &ny_seconds)) {
     return fallback;
   }
 
@@ -104,7 +208,7 @@ SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fal
     return _mkgmtime64(&base);
   }();
 
-  const double seconds_delta = static_cast<double>(parsed_seconds - base_seconds);
+  const double seconds_delta = static_cast<double>(ny_seconds - base_seconds);
   return seconds_delta / kSecondsPerDay;
 }
 
@@ -326,7 +430,7 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
   marker_label.date_time = start_time;
   marker_label.use_relative_vertical = true;
   marker_label.relative_y = 98.0f;
-  marker_label.text = "Plan generated " + generated_at_iso8601;
+  marker_label.text = FormatIso8601AsNewYorkLabel(generated_at_iso8601);
   marker_label.alignment = DT_LEFT | DT_TOP;
   marker_label.color = RGB(255, 204, 0);
   marker_label.font_size = 9;
