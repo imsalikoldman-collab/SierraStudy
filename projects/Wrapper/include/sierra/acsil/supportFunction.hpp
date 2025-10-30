@@ -29,6 +29,16 @@ void LogDllStartup(SCStudyInterfaceRef sc);
 SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fallback);
 
 /**
+ * @brief Рисует автономную тестовую горизонтальную линию.
+ * @param sc Контекст Sierra Chart.
+ * @param existing_line_number Существующий LineNumber (если линия уже создана).
+ * @return Актуальный LineNumber созданной/обновлённой линии.
+ * @note Использует DRAWING_LINE между фиксированными датами для отладки UseTool.
+ * @warning Линия создаётся только если отладочный режим включён в реализации.
+ */
+int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number);
+
+/**
  * @brief Создаёт графические объекты, представляющие зоны плана и уровни.
  * @param sc Интерфейс study для доступа к графику.
  * @param instrument План конкретного инструмента, загруженный из YAML.

@@ -37,6 +37,13 @@ SierraStudy/
 ├─ external/                   # пути до SDK/утилит (под игнором)
 │  └─ README.md                # опишите локальную установку SDK Sierra
 │
+├─ docs/
+│  ├─ PlanTableRenderingSpec.md
+│  ├─ RENDERING_SPEC.md
+│  ├─ YML_v1.5-min-obj_spec.md
+│  ├─ SierraACSILQuickTips.md  # практические советы по SCDateTime/UseTool
+│  └─ требования_к_спецификации_отображения.md
+│
 ├─ third_party/
 │  ├─ googletest/              # submodule или вручную
 │  └─ plog/                    # header‑only логгер
@@ -58,6 +65,7 @@ SierraStudy/
 **Переменные окружения (на каждой машине):**
 - `SIERRA_SDK_DIR` → папка с заголовками ACSIL (обычно `.../SierraChart/ACS_Source`).
 - `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\2308\Data`).
+- Целевая рабочая версия Sierra Chart: **2308** (используется при тестировании и hot-swap).
 
 ---
 
@@ -234,4 +242,7 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 ## 11) Ежедневный цикл (коротко)
 1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **Commit/Push**.  
 Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `logs/SierraStudy.log`.
+
+## 12) Дополнительные материалы
+- `docs/SierraACSILQuickTips.md` — шпаргалка по `SCDateTime`, `UseTool` и отладочным линиям Sierra Chart.
 

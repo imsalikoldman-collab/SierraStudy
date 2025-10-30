@@ -18,6 +18,7 @@ constexpr const char* kLevelFontFace = "Consolas";
 constexpr int kLevelFontSize = 8;
 constexpr bool kLevelFontBold = false;
 constexpr UINT kLevelTextAlignment = DT_CENTER | DT_BOTTOM;
+constexpr bool kEnableDebugTestLine = true;
 
 #if defined(_WIN32)
 std::time_t MakeTimeUtc(std::tm tm) { return _mkgmtime64(&tm); }
@@ -79,6 +80,10 @@ bool TryParseIso8601ToNewYorkSeconds(const std::string& iso8601, std::time_t* ny
       }
       value.resize(value.size() - 6);
     }
+  }
+
+  if (const std::size_t dot_pos = value.find('.'); dot_pos != std::string::npos) {
+    value.erase(dot_pos);
   }
 
   std::tm tm_components{};
@@ -210,6 +215,45 @@ SCDateTime ConvertIso8601ToSCDateTime(const std::string& iso8601, SCDateTime fal
 
   const double seconds_delta = static_cast<double>(ny_seconds - base_seconds);
   return seconds_delta / kSecondsPerDay;
+}
+
+int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number) {
+  if (!kEnableDebugTestLine) {
+    return existing_line_number;
+  }
+
+  s_UseTool tool;
+  tool.Clear();
+  tool.ChartNumber = sc.ChartNumber;
+  tool.DrawingType = DRAWING_LINE;
+  tool.AddMethod = UTAM_ADD_OR_ADJUST;
+  tool.AddAsUserDrawnDrawing = 0;
+  tool.LineWidth = 2;
+  tool.LineStyle = LINESTYLE_SOLID;
+  tool.Color = RGB(255, 0, 0);
+
+  if (existing_line_number != 0) {
+    tool.LineNumber = existing_line_number;
+  }
+
+  SCDateTime begin_time;
+  begin_time.SetDateTimeYMDHMS(2025, 10, 26, 18, 0, 0);
+  SCDateTime end_time_raw;
+  end_time_raw.SetDateTimeYMDHMS(2025, 10, 28, 18, 0, 0);
+
+  if (end_time_raw >= begin_time) {
+    tool.BeginDateTime = begin_time;
+    tool.EndDateTime = end_time_raw;
+  } else {
+    tool.BeginDateTime = end_time_raw;
+    tool.EndDateTime = begin_time;
+  }
+
+  tool.BeginValue = 25700.0f;
+  tool.EndValue = 25700.0f;
+
+  sc.UseTool(tool);
+  return tool.LineNumber;
 }
 
 /**
@@ -460,7 +504,9 @@ void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
     text_tool.Text = label.text.c_str();
     text_tool.EndValue = text_tool.BeginValue;
     register_tool(text_tool);
-  }  auto marker = init_tool();
+  }
+
+  auto marker = init_tool();
   marker.DrawingType = DRAWING_VERTICALLINE;
   marker.BeginDateTime = start_time;
   marker.EndDateTime = start_time;

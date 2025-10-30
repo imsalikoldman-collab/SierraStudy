@@ -31,6 +31,7 @@ namespace {
 
 constexpr int kPersistLogging = 1;
 constexpr int kPersistPlanState = 2;
+constexpr int kPersistDebugLine = 3;
 constexpr double kDefaultPlanCheckIntervalSeconds = 15.0;
 constexpr double kMinPlanCheckIntervalSeconds = 1.0;
 constexpr double kSecondsPerDay = 24.0 * 60.0 * 60.0;
@@ -459,6 +460,8 @@ void RenderPlanGraphics(SCStudyGraphRef sc, PlanWatcherState& state) {
     return;
   }
 
+  ClearPlanDrawings(sc, state);
+
   SCDateTime start_time = state.plan_start_time;
   if (start_time == 0.0) {
     start_time = sc.BaseDateTimeIn[0];
@@ -533,6 +536,11 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
       state->graphics_dirty = true;
       RenderPlanGraphics(sc, *state);
     }
+    const int debug_line = sc.GetPersistentInt(kPersistDebugLine);
+    if (debug_line != 0) {
+      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, debug_line);
+      sc.SetPersistentInt(kPersistDebugLine, 0);
+    }
     ReleasePlanState(sc);
     return;
   }
@@ -558,6 +566,9 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   UpdatePlanWatcher(sc, state, plan_directory, plan_file_name, poll_interval);
   RenderPlanTable(sc, *state);
   RenderPlanGraphics(sc, *state);
+  int debug_line_number = sc.GetPersistentInt(kPersistDebugLine);
+  debug_line_number = sierra::acsil::RenderStandaloneDebugLine(sc, debug_line_number);
+  sc.SetPersistentInt(kPersistDebugLine, debug_line_number);
 
   const int period = (std::max)(1, periodInput.GetInt());
   sc.DataStartIndex = period - 1;
