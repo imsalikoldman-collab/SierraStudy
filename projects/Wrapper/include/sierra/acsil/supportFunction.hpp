@@ -61,6 +61,18 @@ int RenderStandaloneDebugLine(SCStudyGraphRef sc, int existing_line_number);
  * @note Перед построением функция удаляет объекты, перечисленные в line_numbers.
  * @warning Убедитесь, что line_numbers принадлежит текущему инстансу study.
  */
+/**
+ * @brief Создаёт графические объекты для отображения торгового плана на графике.
+ * @param sc Контекст Sierra Chart, предоставляющий доступ к UseTool.
+ * @param instrument План инструмента, полученный после парсинга YAML.
+ * @param start_time Левая граница временного диапазона (обычно время генерации плана).
+ * @param end_time Правая граница временного диапазона (край актуального окна графика).
+ * @param line_numbers Контейнер, куда сохраняются идентификаторы созданных объектов.
+ * @param generated_at_iso8601 Строка времени генерации плана в формате ISO-8601.
+ * @param marker_style Параметры вертикальной линии-маркера.
+ * @note Последовательность отрисовки детально задокументирована в docs/PlanGraphicsRendering.md; при изменении логики синхронизируйте документ.
+ * @warning Контейнер line_numbers должен быть привязан к текущему экземпляру study, иначе возможны утечки объектов.
+ */
 void RenderInstrumentPlanGraphics(SCStudyGraphRef sc,
                                   const sierra::core::InstrumentPlan& instrument,
                                   SCDateTime start_time,
