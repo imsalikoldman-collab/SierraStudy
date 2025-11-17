@@ -8,3 +8,10 @@
 /// @note Декларацию выносим в заголовок, чтобы её могли видеть study.cpp и потенциальные другие модули обёртки.
 /// @warning Убедитесь, что сигнатура и имя полностью совпадают с экспортом в реализации.
 SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc);
+
+/// @brief ��窠 ������, �����஢������� ������������ ����� delta � vol/s �� �������� ���樨.
+/// @param sc ����䥩� ACSIL, ���ᮡ����騩 ����饩 ������ Sierra Chart.
+/// @return void.
+/// @note ������ ����⭮ ����६����� ����������� ����� �ᯠ�� �� ����権, ����� ������� ����஢塞 � Subgraphs.
+/// @warning ��������, �� ᮫� ��������� ���᫥��� �������� delta/vol/s ���� ����ᡠ������, �� ࠧ��� 㤮� ��������� N/A.
+SCSFExport scsf_SierraStudyDeltaVolHeadsUp(SCStudyGraphRef sc);
