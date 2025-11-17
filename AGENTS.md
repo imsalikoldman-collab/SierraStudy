@@ -5,10 +5,12 @@
 ---
 
 ## 1) Архитектура solution
-**Одна `.sln` и три проекта:**
+**Одна `.sln` и четыре проекта:**
 - **Core** — *Static Library (.lib)*. Чистая бизнес-логика. **Без** `SierraChart.h` и любых ACSIL-типов.
 - **Wrapper** — *Dynamic Library (.dll)*. Обёртка ACSIL: читает входы/создаёт Subgraphs, вызывает Core, пишет результат в `sc.Subgraph`. Инициализирует логирование `plog` (если нужно).
 - **Tests** — *Console (exe)* на **Google Test**, линкуется **только** с `Core.lib`. Тесты актуализируем совместно с кодом.
+- **Advisor** — *Utility project* для сборки советника MetaTrader 5 через `MetaEditor.exe`.
+- Для полноценной работы советника потребуется **нативная DLL**, реализующая работу с именованными каналами (WinAPI). DLL размещаем в каталоге MT5, подключаем через `#import`, настройки передаём через входные параметры советника.
 
 **Принципы:**
 - Код в **Core** не зависит от **Wrapper**: никакого `SierraChart.h`, WinAPI и т.п.
@@ -42,9 +44,11 @@ SierraStudy/
 │  └─ plog/                    # header‑only логгер
 │
 ├─ projects/
-│  ├─ Core/      (include/sierra/core/, src/, SierraStudy.Core.vcxproj)
-│  ├─ Wrapper/   (include/sierra/ascil/, src/, SierraStudy.Wrapper.vcxproj)
-│  └─ Tests/     (unit/, data/, SierraStudy.Tests.vcxproj)
+│  ├─ Core/          (include/sierra/core/, src/, SierraStudy.Core.vcxproj)
+│  ├─ Wrapper/       (include/sierra/ascil/, src/, SierraStudy.Wrapper.vcxproj)
+│  ├─ Tests/         (unit/, data/, SierraStudy.Tests.vcxproj)
+│  ├─ Advisor/       (src/SierraStudyAdvisor.mq5, SierraStudy.Advisor.vcxproj)
+│  └─ AdvisorBridge/ (include/sierra/bridge/, src/, SierraStudy.AdvisorBridge.vcxproj)
 │
 ├─ scripts/                    # PowerShell 7 для сборки/замены DLL
 │  ├─ HotSwap.ps1              # горячая замена DLL в SIERRA_DATA_DIR
@@ -58,6 +62,9 @@ SierraStudy/
 **Переменные окружения (на каждой машине):**
 - `SIERRA_SDK_DIR` → папка с заголовками ACSIL (обычно `.../SierraChart/ACS_Source`).
 - `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\SierraChart\Data`).
+- `MT5_DATA_DIR` → каталог данных MetaTrader 5 (например `C:\Users\Имя\AppData\Roaming\MetaQuotes\Terminal\<хэш>\`).
+- `METAEDITOR_EXE` → (опц.) путь к `MetaEditor.exe`. По умолчанию ищем в `C:\Program Files\Tickmill MT5 Terminal` и стандартных установках MT5.
+- (Для AdvisorBridge) сборку ведём под MSVC v143, бинарь копируем в `MQL5\Libraries`.
 
 ---
 
@@ -178,6 +185,21 @@ $ErrorActionPreference='Stop'
 & pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Wrapper.dll" -SierraDataDir $env:SIERRA_DATA_DIR
 ```
 
+`scripts/CompileAdvisor.ps1`:
+```powershell
+param(
+  [string]$Source = ..\projects\Advisor\src\SierraStudyAdvisor.mq5
+  [string]$OutputDir = ..\out\mt5
+  [string]$MetaEditorPath,
+  [string]$Mt5DataDir = $env:MT5_DATA_DIR
+  [string]$BridgeBinary = ..\projects\AdvisorBridge\x64\Release\AdvisorBridge.dll
+)
+# копирует .mq5 в $Mt5DataDir\MQL5\Experts\SierraStudy,
+# вызывает MetaEditor (ищем в стандартных путях и в C:\Program Files\Tickmill MT5 Terminal),
+# возвращает .ex5 в out\mt5\Experts, а также копирует AdvisorBridge.dll в out\mt5\Experts и MQL5\Libraries.
+# Перед запуском убедитесь, что проект AdvisorBridge собран (обычно Release|x64).
+```
+
 ---
 
 ## 8) Границы Core ⇄ Wrapper (минимальный скелет)
@@ -220,6 +242,6 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 ---
 
 ## 11) Ежедневный цикл (коротко)
-1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **Commit/Push**.  
-Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`.
+1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **AdvisorBridge + Advisor (по необходимости)** → 5) **Commit/Push**.  
+Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`. Перед пересборкой MT5 советника обновляем `AdvisorBridge.dll` (MSBuild) и выполняем `scripts/CompileAdvisor.ps1`.
 
