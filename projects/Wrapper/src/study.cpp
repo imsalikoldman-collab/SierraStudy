@@ -268,8 +268,11 @@ SCSFExport scsf_SierraStudyDeltaVolHeadsUp(SCStudyGraphRef sc) {
   SCInputRef vertical_spacing = sc.Input[5];
   SCInputRef delta_prefix = sc.Input[6];
   SCInputRef vol_prefix = sc.Input[7];
-  SCInputRef delta_color_input = sc.Input[8];
+  SCInputRef delta_neutral_color_input = sc.Input[8];
   SCInputRef vol_color_input = sc.Input[9];
+  SCInputRef delta_positive_color_input = sc.Input[10];
+  SCInputRef delta_negative_color_input = sc.Input[11];
+  SCInputRef neutral_value_input = sc.Input[12];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - Delta & Vol/S Label";
@@ -320,11 +323,21 @@ SCSFExport scsf_SierraStudyDeltaVolHeadsUp(SCStudyGraphRef sc) {
     vol_prefix.Name = "Vol/S Prefix";
     vol_prefix.SetString("");
 
-    delta_color_input.Name = "Delta Text Color";
-    delta_color_input.SetColor(RGB(255, 128, 0));
+    delta_neutral_color_input.Name = "Delta Neutral Color";
+    delta_neutral_color_input.SetColor(RGB(255, 128, 0));
 
     vol_color_input.Name = "Vol/S Text Color";
     vol_color_input.SetColor(RGB(255, 128, 0));
+
+    delta_positive_color_input.Name = "Delta Positive Color";
+    delta_positive_color_input.SetColor(RGB(0, 192, 0));
+
+    delta_negative_color_input.Name = "Delta Negative Color";
+    delta_negative_color_input.SetColor(RGB(220, 32, 32));
+
+    neutral_value_input.Name = "Delta Neutral Threshold";
+    neutral_value_input.SetFloat(0.1f);
+    neutral_value_input.SetFloatLimits(0.0f, 1.0f);
 
     return;
   }
@@ -366,11 +379,23 @@ SCSFExport scsf_SierraStudyDeltaVolHeadsUp(SCStudyGraphRef sc) {
   const double delta_price = anchor_price + spacing_ticks * 0.5;
   const double vol_price = anchor_price - spacing_ticks * 0.5;
 
+  const double neutral_threshold =
+      std::clamp(static_cast<double>(neutral_value_input.GetFloat()), 0.0, 1.0);
+  COLORREF delta_color = delta_neutral_color_input.GetColor();
+  if (delta_value.available) {
+    if (delta_value.value > neutral_threshold) {
+      delta_color = delta_positive_color_input.GetColor();
+    } else if (delta_value.value < -neutral_threshold) {
+      delta_color = delta_negative_color_input.GetColor();
+    }
+  }
+  const COLORREF vol_color = vol_color_input.GetColor();
+
   DrawFloatingText(sc, kDeltaTextToolId, delta_style,
-                   delta_color_input.GetColor(), delta_text, last_index,
-                   delta_price, horizontal_bars, 0.0);
-  DrawFloatingText(sc, kVolTextToolId, vol_style, vol_color_input.GetColor(),
-                   vol_text, last_index, vol_price, horizontal_bars, 0.0);
+                   delta_color, delta_text, last_index, delta_price,
+                   horizontal_bars, 0.0);
+  DrawFloatingText(sc, kVolTextToolId, vol_style, vol_color, vol_text,
+                   last_index, vol_price, horizontal_bars, 0.0);
 }
 
 
