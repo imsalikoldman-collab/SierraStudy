@@ -1,79 +1,89 @@
-# Спецификация протокола обмена Sierra Chart ↔ MT5 через DLL‑мост
+# Спецификация протокола обмена Sierra Chart ↔ MT5 через DLL‑мост (v1.1)
 
-Документ фиксирует договорённости между Sierra Chart study, DLL `SierraStudyAdvisorBridgeMT5.dll` и советником MetaTrader 5. Спецификация описывает транспорт, формат сообщений и требования к обработке ошибок, чтобы любые стороны могли быть реализованы независимо.
+Документ фиксирует актуальный формат обмена между стадией `scsf_SierraStudyBridge`, DLL `SierraStudyAdvisorBridgeMT5.dll` и советником MetaTrader 5. Схема согласована с реализацией в `projects/Wrapper/src/study.cpp` и дополняет детали алгоритма из `docs/bridge_sierra_mt5_spec.md`.
 
-## 1. Стороны и ответственность
+---
 
-| Сторона | Роль |
-|---------|------|
-| **Sierra Chart study (Wrapper)** | Собирает данные из ACSIL, формирует JSON‑сообщения, пишет их в именованный канал, принимает ответы (при необходимости). |
-| **SierraStudyAdvisorBridgeMT5.dll** | Инкапсулирует WinAPI (named pipe) и предоставляет C‑совместимый API для MT5 (`SierraPipeConnect/Read/Write/Close`). Отвечает за буферизацию, тайм‑ауты и возврат кодов ошибок `-1`. |
-| **Советник MT5 (`SierraStudyAdvisor.mq5`)** | Через `#import` вызывает функции моста, принимает JSON, выполняет торговую логику и возвращает статусы/ответы (если предусмотрены). |
+## 1. Стороны и транспорт
+- **Sierra Chart study (Wrapper)** — формирует JSON‑сообщения и пишет их в именованный канал.
+- **SierraStudyAdvisorBridgeMT5.dll** — WinAPI‑клиент pipe, экспортирующий `SierraPipeConnect/Read/Write/Close` для MT5.
+- **Советник MT5 (`SierraStudyAdvisor.mq5`)** — считывает JSON через DLL, выполняет торговые действия и, при необходимости, возвращает ответы.
 
-## 2. Транспортный уровень
-- **Канал**: `\\.\pipe\SierraStudyAdvisor` (строка может быть переопределена через вход советника и study; значение должно быть согласовано на обеих сторонах).
-- **Режим**: `FILE_FLAG_OVERLAPPED`, full‑duplex.
-- **Буферы**: рекомендованный размер 4 KB минимум; при превышении стороны должны фрагментировать сообщения или увеличить буфер.
-- **Кодировка**: UTF‑8 без BOM.
-- **Синхронизация**: Study отвечает за сериализацию записей (один JSON → одна операция `WriteFile`). Советник читает циклически с тайм‑аутом `InpPollIntervalMs`. При бездействии допускается отправка heartbeat (`"type":"ping"`).
+Транспорт:
+- Канал: `\\.\pipe\SierraStudyAdvisor` (может быть переопределён, стороны должны совпадать).
+- Режим: `FILE_FLAG_OVERLAPPED`, full‑duplex.
+- Кодировка: UTF‑8 без BOM.
+- Границы сообщений: одна запись `WriteFile` = одна строка JSON, заканчивающаяся `\n`.
+- Рекомендованный буфер чтения: ≥4 KB; при переполнении стороны должны фрагментировать данные или расширять буфер.
 
-## 3. Формат сообщения (Sierra → MT5)
+---
 
-JSON‑объект (актуальная схема `1.1`) имеет следующую структуру:
+## 2. Версионирование
+- Текущая схема — `1.1`.
+- Поле `version` опционально: стадия сейчас его не добавляет, советник должен трактовать отсутствие поля как `"1.1"`.
+- При несовпадении версии стороны логируют предупреждение; критичные изменения требуют обновления study/DLL/советника одновременно.
 
-| Поле | Тип | Обяз. | Описание |
-|------|-----|-------|----------|
-| `version` | `string` | да | Семантическая версия схемы (`"1.1"`). |
-| `symbol` | `string` | да | Тикер Sierra (`MNQZ5`). |
-| `position_id` | `string` | да | Уникальный идентификатор позиции. Используется для сопоставления открытия/модификации/закрытия. |
-| `direction` | `enum["long","short"]` | да | Направление входа. |
-| `entry` | `object` | да | `price` (`number`, 2 знака), `type` (`"market"`, `"limit"`, `"stop"`). |
-| `stop` | `object` | да | `price` (`number`, 2 знака), `type`. |
-| `take` | `object` | нет | Аналогично `stop`; отсутствует, если тейк не задан. |
-| `status` | `enum["open","modify","close"]` | да | Этап жизненного цикла позиции. |
-| `timestamp` | `string` | да | ISO‑8601 в часовом поясе Нью-Йорка (`YYYY-MM-DDTHH:MM:SS-05:00/-04:00`). |
-| `note` | `string` | нет | Пользовательский комментарий (символ счёта, пояснения). |
-| `payload` | `object` | нет | Расширения (например, доля риска). |
+---
 
-### Правила обработки
-1. Все цены передаются «как есть» и округляются study до двух знаков. MT5 **не** применяет offset.
-2. `status="open"` → создать позицию с указанным `position_id`. `status="modify"` → обновить существующую позицию с тем же ID. `status="close"` → закрыть позицию и удалить связанные линии.
-3. При отсутствии `take` советник должен пропускать установку тейк-профита.
-4. `payload.risk.percent` (если передан) — рекомендация по проценту депозита для расчёта объёма: `volume = (balance * percent / 100) / (stop_points * tick_cost)`.
-5. Каждое сообщение заканчивается `\n`. Со стороны MT5 допускается чтение по буферу до символа перевода строки.
+## 3. Сообщения Sierra → MT5
+
+### 3.1. Общие поля
+- `version` — строка, по умолчанию `"1.1"` (если отсутствует).
+- `type` — одно из: `OPEN_SIGNAL`, `ENTRY_AFTER_STOP`, `STOP_ONLY`, `STOP_LEVEL`, `CLOSE_SIGNAL`.
+- `trade_id` — строковый идентификатор сделки (генерируется стадией).
+- `symbol` — тикер Sierra.
+- `direction` — `LONG` или `SHORT` (если определено на момент отправки).
+- `ts_ms` — Unix‑время события в миллисекундах (UTC).
+- `source` — всегда `"sierra"`.
+- `note` — опционально, строка из входа `Note (optional)`.
+- Все цены выводятся с двумя знаками после запятой.
+
+### 3.2. Поля по типам
+- `STOP_ONLY` — `stop_price`, `mode="STOP_FIRST"`.
+- `ENTRY_AFTER_STOP` — `entry_price`.
+- `OPEN_SIGNAL` — `entry_price`.
+- `STOP_LEVEL` — `stop_price`, `mode="ENTRY_FIRST"`.
+- `CLOSE_SIGNAL` — `close_reason` (`signal/manual/flatten`), `close_price`.
+
+### 3.3. Правила обработки на стороне MT5
+- Для режима **STOP_FIRST**: сначала приходит `STOP_ONLY`, затем при появлении позиции — `ENTRY_AFTER_STOP`. После пары сообщений сделка считается переданной; переносы/изменения стопа MT5 не ждёт.
+- Для режима **ENTRY_FIRST**: сначала `OPEN_SIGNAL`, потом первый стоп `STOP_LEVEL`. Последующие переносы стопа игнорируются.
+- После получения обоих компонент (вход + стоп) любые новые `STOP_ONLY/STOP_LEVEL/ENTRY_AFTER_STOP` по тому же `trade_id` игнорируются; ожидается только `CLOSE_SIGNAL`.
+- `CLOSE_SIGNAL` означает закрытие позиции по `trade_id` (обычно рынком). MT5 должен завершить сопровождение позиции и освободить локальное состояние.
+
+---
 
 ## 4. Ответы MT5 → Sierra (опционально)
-- Формат также JSON (`type`, `symbol`, `status`, `position_id`, `message`). Предусматривается для ack или ошибок. Если study пока не читает ответы, советник просто логирует их.
-- Рекомендуемое подтверждение: `{"type":"ack","symbol":"MNQZ5","position_id":"...","status":"accepted","timestamp":"...","note":"order-id"}`.
-- Ошибки: `{"type":"error","symbol":"MNQZ5","position_id":"...","code":451,"message":"Off quotes"}`. DLL возвращает размер записи; 0 → тайм‑аут.
+- Формат JSON‑строки, заканчивающейся `\n`.
+- Поля: `type` (`"ack"`/`"error"`/`"ping"`), `symbol`, `trade_id`, `status`, `message`, `timestamp`.
+- Пример ack: `{"type":"ack","symbol":"MNQZ5","trade_id":"...","status":"accepted","timestamp":"..."}`.
+- Пример ошибки: `{"type":"error","symbol":"MNQZ5","trade_id":"...","code":451,"message":"Off quotes"}`.
+- Если study не читает ответы, советник обязан логировать их локально; DLL возвращает размер записи (0 — тайм‑аут, -1 — ошибка WinAPI).
 
-## 5. Обработка ошибок и повторов
-1. **Соединение**: советник пытается `SierraPipeConnect` при `InpAutoConnect=true`. Повтор каждые `InpPollIntervalMs` до успеха. Study после старта сразу создаёт именованный канал с открытой DACL и держит его постоянно открытым.
-2. **Чтение**: код `-1` → ошибка WinAPI. Советник закрывает и переоткрывает канал; study фиксирует ошибку в `Logs/sierrastudymt5.log` и отображает её в строке статуса.
-3. **Формат**: невалидный JSON → ответственность советника. Рекомендуется оборачивать парсер в `try` и отдавать `type="error"` c описанием.
-4. **Версионирование**: несовпадение `version` → стороны логируют предупреждение. При критичном расхождении MT5 может игнорировать запись до обновления study/DLL.
+---
 
-## 6. API DLL (резюме)
+## 5. Ошибки и переподключение
+- **Соединение**: советник вызывает `SierraPipeConnect` при `InpAutoConnect=true` и переоткрывает канал при сбое. Study создаёт pipe при старте и держит его открытым.
+- **Чтение/запись**: `-1` → ошибка WinAPI, 0 при чтении → тайм‑аут. При ошибках советник переоткрывает канал, study пишет детали в `Logs/sierrastudymt5.log` и отображает их в оверлее (см. `bridge_sierra_mt5_spec.md`).
+- **Неверный JSON**: следует отправить `type="error"` и продолжить цикл чтения. Сторона‑отправитель должна логировать некорректный payload.
+- **Несовпадение версии**: логировать предупреждение; при критичной несовместимости MT5 может игнорировать запись.
 
-```cpp
-int  SierraPipeConnect(const char* pipe_name);   // 1 при успехе, -1 при ошибке
-void SierraPipeClose();
-int  SierraPipeWrite(const uint8_t* data, int size);      // количество записанных байт или -1
-int  SierraPipeRead(uint8_t* buffer, int size, int timeout_ms); // байты или 0 при тайм‑ауте
-```
+---
 
-DLL должна логировать в `Logs/SierraStudy.log` (через study) только при необходимости, чтобы не блокировать горячие циклы.
+## 6. Сборка и развёртывание
+1. `scripts/BuildSolution.ps1 -Configuration Release -Mt5DataDir <путь>` — сборка DLL моста и советника, прогон тестов.
+2. DLL моста копируется в `MQL5\Libraries\SierraStudyAdvisorBridgeMT5.dll`, советник — в `MQL5\Experts\SierraStudy\SierraStudyAdvisor.ex5` и `out/mt5/Experts`.
+3. Горячая замена study в Sierra: `scripts/HotSwap.ps1 -Dll <путь к SierraStudyMT5.dll> -SierraDataDir %SIERRA_DATA_DIR%` или `BuildAndSwap.ps1`.
 
-## 7. Сборка и развёртывание
-1. `scripts/BuildSolution.ps1 -Configuration Release -Mt5DataDir <путь>` — единый сценарий, собирающий `SierraStudyMT5.dll`, `SierraStudyAdvisorBridgeMT5.dll`, прогоняющий тесты и компилирующий `SierraStudyAdvisor.ex5`.
-2. DLL моста копируется в `MQL5\Libraries\SierraStudyAdvisorBridgeMT5.dll`, советник — в `MQL5\Experts\SierraStudy\SierraStudyAdvisor.ex5` и `out/mt5/Experts` для версионирования.
-3. Перед hot-swap в Sierra Chart запустить `scripts/HotSwap.ps1 -Dll <путь к SierraStudyMT5.dll> -SierraDataDir %SIERRA_DATA_DIR%` или использовать `BuildAndSwap.ps1`.
+---
 
-## 8. Контроль изменений
-- Любые изменения схемы JSON или API DLL фиксируются в этом файле и в `AGENTS.md`. Номер версии следует повышать (`version` в payload).
-- При обновлении структуры нужно добавлять соответствующие тесты (Google Test для Core, интеграционный тест для советника) и пример в `examples/ascil_usage`.
+## 7. Контроль изменений
+- Любые правки схемы JSON или API DLL фиксируются здесь и в `AGENTS.md`; при изменении структуры увеличивается `version`.
+- Добавляйте тесты (Google Test для Core, интеграционный сценарий для советника) и образцы в `examples/ascil_usage` при расширении протокола.
 
-## 9. Ссылки
+---
+
+## 8. Ссылки
+- `docs/bridge_sierra_mt5_spec.md` — подробная логика работы стадии в Sierra.
 - `docs/AdvisorBridge.md` — обзор архитектуры моста.
-- `scripts/CompileAdvisor.ps1`, `scripts/BuildSolution.ps1` — автоматизация сборок.
-- `projects/Advisor/src/SierraStudyAdvisor.mq5` — эталонная реализация клиентской стороны MT5.
+- `projects/Advisor/src/SierraStudyAdvisor.mq5` — эталонная клиентская сторона MT5.
