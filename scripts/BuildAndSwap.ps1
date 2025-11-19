@@ -69,7 +69,7 @@ if (-not $NoHotSwap -and $HotSwapConfiguration -ne $Configuration) {
 $testOutputDir = Join-Path $PSScriptRoot "..\out\$Platform\$Configuration"
 $testExe = Join-Path $testOutputDir 'SierraStudy.Tests.exe'
 $hotSwapDir = Join-Path $PSScriptRoot "..\out\$Platform\$HotSwapConfiguration"
-$wrapperDll = Join-Path $hotSwapDir 'SierraStudy.dll'
+$wrapperDll = Join-Path $hotSwapDir 'SierraStudyMT5.dll'
 
 if (-not $SkipTests) {
   $invokeTests = Join-Path $PSScriptRoot 'Invoke-Tests.ps1'

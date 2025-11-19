@@ -1,6 +1,11 @@
 # AGENTS.md — VS Code + Codex GPT для разработки Sierra Chart (ACSIL, MSBuild, VS2022)
 
-**Цель:** единый цикл *редактирование в VS Code (расширение Codex GPT) → сборка MSBuild → тесты Google Test → горячая замена DLL в Sierra Chart* при строгом разделении `Core/Wrapper/Tests`. Хранилище — GitHub. Логи (по необходимости) — `plog` в отдельный файл. Примеры кода и примеры использования ASCIL — в `examples/`. Скрипты PowerShell 7 — в `scripts/`.
+**Цель:** единый цикл *редактирование в VS Code (расширение Codex GPT) → сборка MSBuild → тесты Google Test → горячая замена DLL в Sierra Chart* при строгом разделении `Core/Wrapper/Tests`. Хранилище — GitHub. Логи (по необходимости) — `plog` в отдельный файл. Примеры кода и примеры использования ASCIL — в `examples/`. Скрипты PowerShell 7 — в `scripts/`.
+
+---
+
+## 0) Требования к ответам Codex GPT
+- Во всех сообщениях Codex GPT использует только русский язык (включая статусы, пояснения и резюме).
 
 ---
 
@@ -11,6 +16,8 @@
 - **Tests** — *Console (exe)* на **Google Test**, линкуется **только** с `Core.lib`. Тесты актуализируем совместно с кодом.
 - **Advisor** — *Utility project* для сборки советника MetaTrader 5 через `MetaEditor.exe`.
 - Для полноценной работы советника потребуется **нативная DLL**, реализующая работу с именованными каналами (WinAPI). DLL размещаем в каталоге MT5, подключаем через `#import`, настройки передаём через входные параметры советника.
+- Подробная схема взаимодействия ACSIL ↔ MT5 описана в `docs/AdvisorBridge.md`.
+- Полная спецификация протокола обмена (`JSON`, статусы, транспорт) — `docs/SierraMT5Protocol.md`.
 
 **Принципы:**
 - Код в **Core** не зависит от **Wrapper**: никакого `SierraChart.h`, WinAPI и т.п.
@@ -148,7 +155,7 @@ inline void InitLogging() {
     { "label": "Hot-Swap", "type": "shell",
       "command": "pwsh",
       "args": ["-NoProfile","-File","${workspaceFolder}/scripts/HotSwap.ps1",
-        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Wrapper.dll",
+        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudyMT5.dll",
         "-SierraDataDir","${env:SIERRA_DATA_DIR}"] }
   ],
   "inputs": [
@@ -182,7 +189,7 @@ $ErrorActionPreference='Stop'
 
 & msbuild.exe "$PSScriptRoot\..\SierraStudy.sln" /m /p:Configuration=$Configuration /p:Platform=x64
 & "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Tests.exe" --gtest_color=yes
-& pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Wrapper.dll" -SierraDataDir $env:SIERRA_DATA_DIR
+& pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudyMT5.dll" -SierraDataDir $env:SIERRA_DATA_DIR
 ```
 
 `scripts/CompileAdvisor.ps1`:
@@ -192,11 +199,11 @@ param(
   [string]$OutputDir = ..\out\mt5
   [string]$MetaEditorPath,
   [string]$Mt5DataDir = $env:MT5_DATA_DIR
-  [string]$BridgeBinary = ..\projects\AdvisorBridge\x64\Release\AdvisorBridge.dll
+  [string]$BridgeBinary = ..\projects\AdvisorBridge\x64\Release\SierraStudyAdvisorBridgeMT5.dll
 )
 # копирует .mq5 в $Mt5DataDir\MQL5\Experts\SierraStudy,
 # вызывает MetaEditor (ищем в стандартных путях и в C:\Program Files\Tickmill MT5 Terminal),
-# возвращает .ex5 в out\mt5\Experts, а также копирует AdvisorBridge.dll в out\mt5\Experts и MQL5\Libraries.
+# возвращает .ex5 в out\mt5\Experts, а также копирует SierraStudyAdvisorBridgeMT5.dll в out\mt5\Experts и MQL5\Libraries.
 # Перед запуском убедитесь, что проект AdvisorBridge собран (обычно Release|x64).
 ```
 
@@ -243,5 +250,12 @@ SCSFExport scsf_MyMA(SCStudyGraphRef sc){
 
 ## 11) Ежедневный цикл (коротко)
 1) **Build** → 2) **Test** → 3) **Hot‑Swap** → 4) **AdvisorBridge + Advisor (по необходимости)** → 5) **Commit/Push**.  
-Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`. Перед пересборкой MT5 советника обновляем `AdvisorBridge.dll` (MSBuild) и выполняем `scripts/CompileAdvisor.ps1`.
+Тесты и код поддерживаем синхронно; лог включаем только при необходимости и пишем в отдельный файл `Logs/SierraStudy.log`. Перед пересборкой MT5 советника обновляем `SierraStudyAdvisorBridgeMT5.dll` (MSBuild) и выполняем `scripts/CompileAdvisor.ps1`.
+
+## 12) Sierra ↔ MT5 Bridge (диагностика и договорённости)
+- Все договорённости по обменному протоколу фиксируем в `docs/SierraMT5Protocol.md`, а практические сценарии и пайплайн сборки — в `docs/AdvisorBridge.md` (обязательно держать эти файлы в актуальном состоянии).
+- Версия схемы JSON — `1.1`: поля `position_id`, `timestamp` в часовом поясе Нью-Йорка, цены с точностью **два знака**, никаких `offset`. Study генерирует ID при открытии и повторно использует его для `modify/close`.
+- Исследование `scsf_SierraStudyBridge` держит именованный канал открытым, отображает строку статуса пайпа в левом нижнем углу чарта (состояние подключения, длина очереди, последняя ошибка) и зеркалирует ошибки в отдельный rolling-журнал `Logs/sierrastudymt5.log`.
+- MT5-советник рассчитывает объём в процентах от депозита (вход советника), открывает/закрывает позиции без поправок по offset и обязан использовать `position_id` для сопоставления сигналов.
+- Для проверки связки без MT5 используем `scripts/PipeMonitor.ps1`, который подключается к `\\.\pipe\SierraStudyAdvisor` и показывает поступающие сообщения в консоли.
 

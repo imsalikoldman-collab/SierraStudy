@@ -26,7 +26,7 @@ param(
   [string]$OutputDir = (Join-Path $PSScriptRoot '..\out\mt5'),
   [string]$MetaEditorPath,
   [string]$Mt5DataDir = $env:MT5_DATA_DIR,
-  [string]$BridgeBinary = (Join-Path $PSScriptRoot '..\projects\AdvisorBridge\x64\Release\AdvisorBridge.dll')
+  [string]$BridgeBinary = (Join-Path $PSScriptRoot '..\projects\AdvisorBridge\x64\Release\SierraStudyAdvisorBridgeMT5.dll')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,8 +75,9 @@ if (-not (Test-Path -LiteralPath $expertsDir)) {
 }
 
 $sourceName = Split-Path -Leaf $Source
-$tempSourceName = "{0}_tmp.mq5" -f ([System.IO.Path]::GetFileNameWithoutExtension($sourceName))
-$targetSource = Join-Path $expertsDir $tempSourceName
+$advisorBaseName = [System.IO.Path]::GetFileNameWithoutExtension($sourceName)
+$workingSourceName = "{0}.build.mq5" -f $advisorBaseName
+$targetSource = Join-Path $expertsDir $workingSourceName
 Copy-Item -LiteralPath $Source -Destination $targetSource -Force
 
 if (-not (Test-Path -LiteralPath $OutputDir)) {
@@ -86,7 +87,7 @@ $outputResolved = (Resolve-Path -LiteralPath $OutputDir).ProviderPath
 $logPath = Join-Path $outputResolved 'MetaEditor.log'
 
 $mt5Mql = (Resolve-Path -LiteralPath (Join-Path $Mt5DataDir 'MQL5')).ProviderPath
-$mt5Inc = (Join-Path $mt5Mql 'Include')
+$mt5Inc = $mt5Mql
 $metaArgs = @(
   "/compile:`"$targetSource`"",
   "/log:`"$logPath`"",
@@ -100,28 +101,30 @@ if ($exitCode -ne 0) {
   Write-Warning "MetaEditor exited with code $exitCode (see $logPath). Continuing if EX5 present."
 }
 
-$compiledPath = [System.IO.Path]::ChangeExtension($targetSource, '.ex5')
-if (-not (Test-Path -LiteralPath $compiledPath)) {
-  throw "Compilation finished but EX5 not found at $compiledPath"
+$compiledTempPath = [System.IO.Path]::ChangeExtension($targetSource, '.ex5')
+if (-not (Test-Path -LiteralPath $compiledTempPath)) {
+  throw "Compilation finished but EX5 not found at $compiledTempPath"
 }
 
 $outputExpertDir = Join-Path $OutputDir 'Experts'
 if (-not (Test-Path -LiteralPath $outputExpertDir)) {
   New-Item -ItemType Directory -Path $outputExpertDir -Force | Out-Null
 }
-$dst = Join-Path $outputExpertDir (Split-Path -Leaf $compiledPath)
-Copy-Item -LiteralPath $compiledPath -Destination $dst -Force
-Copy-Item -LiteralPath $compiledPath -Destination (Join-Path $expertsDir ($sourceName -replace '\.mq5$','.ex5')) -Force
+$finalEx5Name = "{0}.ex5" -f $advisorBaseName
+$dst = Join-Path $outputExpertDir $finalEx5Name
+Copy-Item -LiteralPath $compiledTempPath -Destination $dst -Force
+$finalExpertEx5 = Join-Path $expertsDir $finalEx5Name
+Copy-Item -LiteralPath $compiledTempPath -Destination $finalExpertEx5 -Force
 
 Write-Host "[advisor] Compiled advisor copied to $dst"
 
 Remove-Item -LiteralPath $targetSource -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $compiledPath -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $compiledTempPath -ErrorAction SilentlyContinue
 
 if (Test-Path -LiteralPath $BridgeBinary) {
-  $bridgeDestRepo = Join-Path $OutputDir 'Experts\SierraStudyAdvisorBridge.dll'
+  $bridgeDestRepo = Join-Path $OutputDir 'Experts\SierraStudyAdvisorBridgeMT5.dll'
   Copy-Item -LiteralPath $BridgeBinary -Destination $bridgeDestRepo -Force
-  $bridgeDestMt5 = Join-Path $Mt5DataDir 'MQL5\Libraries\SierraStudyAdvisorBridge.dll'
+  $bridgeDestMt5 = Join-Path $Mt5DataDir 'MQL5\Libraries\SierraStudyAdvisorBridgeMT5.dll'
   Copy-Item -LiteralPath $BridgeBinary -Destination $bridgeDestMt5 -Force
   Write-Host "[advisor] Bridge DLL copied to MT5 Libraries."
 } else {

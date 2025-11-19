@@ -36,7 +36,7 @@ SierraStudy — шаблон репозитория для пользовате�
 Дополнительные детали см. в `AGENTS.md` и `external/README.md`.
 
 ## MetaTrader 5 Advisor
-- Проект `Advisor` содержит шаблон советника `projects/Advisor/src/SierraStudyAdvisor.mq5`, который через `#import` вызывает DLL `SierraStudyAdvisorBridge.dll`.
+- Проект `Advisor` содержит шаблон советника `projects/Advisor/src/SierraStudyAdvisor.mq5`, который через `#import` вызывает DLL `SierraStudyAdvisorBridgeMT5.dll`.
 - `AdvisorBridge` (см. `projects/AdvisorBridge`) реализует WinAPI-слой: `SierraPipeConnect/Read/Write/Close`.
 - Сборка выполняется скриптом `scripts/CompileAdvisor.ps1`, который вызывает `MetaEditor.exe`, складывает `.ex5` и Bridge DLL в `out/mt5/Experts`, а также копирует их в `MQL5\Experts\SierraStudy` и `MQL5\Libraries`.
 - Необходимы переменные окружения:

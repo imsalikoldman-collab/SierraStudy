@@ -32,6 +32,10 @@
   <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <TargetName>SierraStudyAdvisorBridgeMT5</TargetName>
+    <TargetExt>.dll</TargetExt>
+  </PropertyGroup>
   <ItemGroup>
     <ClInclude Include="include\sierra\bridge\api.hpp" />
   </ItemGroup>
