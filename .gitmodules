@@ -4,3 +4,6 @@
 [submodule "third_party/plog"]
 	path = third_party/plog
 	url = https://github.com/SergiusTheBest/plog
+[submodule "third_party/rapidyaml"]
+	path = third_party/rapidyaml
+	url = https://github.com/biojppm/rapidyaml.git
