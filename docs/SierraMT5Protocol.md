@@ -29,26 +29,26 @@
 
 ### 3.1. Общие поля
 - `version` — строка, по умолчанию `"1.1"` (если отсутствует).
-- `type` — одно из: `OPEN_SIGNAL`, `ENTRY_AFTER_STOP`, `STOP_ONLY`, `STOP_LEVEL`, `CLOSE_SIGNAL`.
-- `trade_id` — строковый идентификатор сделки (генерируется стадией).
+- `type` — одно из: `OPEN_SIGNAL`, `STOP_LEVEL`, `CLOSE_SIGNAL` (legacy: `ENTRY_AFTER_STOP`, `STOP_ONLY`
+  оставлены для совместимости, но текущая реализация их не отправляет).
+- `id` — строковый идентификатор сделки (генерируется стадией).
 - `symbol` — тикер Sierra.
 - `direction` — `LONG` или `SHORT` (если определено на момент отправки).
-- `ts_ms` — Unix‑время события в миллисекундах (UTC).
+- `ts_ms` — Unix-время события в миллисекундах (UTC).
 - `source` — всегда `"sierra"`.
 - `note` — опционально, строка из входа `Note (optional)`.
 - Все цены выводятся с двумя знаками после запятой.
 
 ### 3.2. Поля по типам
-- `STOP_ONLY` — `stop_price`, `mode="STOP_FIRST"`.
-- `ENTRY_AFTER_STOP` — `entry_price`.
-- `OPEN_SIGNAL` — `entry_price`.
+- `OPEN_SIGNAL` — `entry_price`, `stop_loss_points` (расстояние до стопа в ценовых пунктах, 2 знака).
 - `STOP_LEVEL` — `stop_price`, `mode="ENTRY_FIRST"`.
 - `CLOSE_SIGNAL` — `close_reason` (`signal/manual/flatten`), `close_price`.
+- Legacy поля `ENTRY_AFTER_STOP/STOP_ONLY` оставлены в описании, но не используются текущей сборкой study.
 
 ### 3.3. Правила обработки на стороне MT5
-- Для режима **STOP_FIRST**: сначала приходит `STOP_ONLY`, затем при появлении позиции — `ENTRY_AFTER_STOP`. После пары сообщений сделка считается переданной; переносы/изменения стопа MT5 не ждёт.
-- Для режима **ENTRY_FIRST**: сначала `OPEN_SIGNAL`, потом первый стоп `STOP_LEVEL`. Последующие переносы стопа игнорируются.
-- После получения обоих компонент (вход + стоп) любые новые `STOP_ONLY/STOP_LEVEL/ENTRY_AFTER_STOP` по тому же `trade_id` игнорируются; ожидается только `CLOSE_SIGNAL`.
+- Для режима **STOP_FIRST** (по умолчанию): study отправляет один `OPEN_SIGNAL`, если фиксирует последовательность «стоп-ордер → вход по маркету» и сторона стопа противоположна направлению входа. `stop_loss_points` сообщает MT5 расстояние от входа до стопа в пунктах. После этого ждём только `CLOSE_SIGNAL`.
+- Для режима **ENTRY_FIRST**: сначала `OPEN_SIGNAL`, затем первый стоп `STOP_LEVEL`. Последующие переносы стопа игнорируются.
+- Любые новые сообщения по `trade_id`, присланные после этапа «вход + первый стоп» (для `ENTRY_FIRST`) или после `OPEN_SIGNAL` (для `STOP_FIRST`), следует игнорировать, остаётся только ожидание `CLOSE_SIGNAL`.
 - `CLOSE_SIGNAL` означает закрытие позиции по `trade_id` (обычно рынком). MT5 должен завершить сопровождение позиции и освободить локальное состояние.
 
 ---
@@ -71,9 +71,9 @@
 ---
 
 ## 6. Сборка и развёртывание
-1. `scripts/BuildSolution.ps1 -Configuration Release -Mt5DataDir <путь>` — сборка DLL моста и советника, прогон тестов.
+1. `scripts/BuildAndSwap.ps1 -Configuration Release -HotSwapConfiguration Release -BuildAdvisor` — сборка (Debug/Release), тесты, hot-swap DLL study; компиляция советника через MetaEditor с копированием в MT5. При отсутствии `MT5_DATA_DIR` используется локальный fallback `C:\Users\admin\AppData\Roaming\MetaQuotes\Terminal\29E91DA909EB4475AB204481D1C2CE7D` (если существует).
 2. DLL моста копируется в `MQL5\Libraries\SierraStudyAdvisorBridgeMT5.dll`, советник — в `MQL5\Experts\SierraStudy\SierraStudyAdvisor.ex5` и `out/mt5/Experts`.
-3. Горячая замена study в Sierra: `scripts/HotSwap.ps1 -Dll <путь к SierraStudyMT5.dll> -SierraDataDir %SIERRA_DATA_DIR%` или `BuildAndSwap.ps1`.
+3. Горячая замена study в Sierra выполняется в шаге 1 или вручную: `scripts/HotSwap.ps1 -Dll <путь к SierraStudyMT5.dll> -SierraDataDir %SIERRA_DATA_DIR%`.
 
 ---
 

@@ -26,7 +26,7 @@ param(
   [string]$OutputDir = (Join-Path $PSScriptRoot '..\out\mt5'),
   [string]$MetaEditorPath,
   [string]$Mt5DataDir = $env:MT5_DATA_DIR,
-  [string]$BridgeBinary = (Join-Path $PSScriptRoot '..\projects\AdvisorBridge\x64\Release\SierraStudyAdvisorBridgeMT5.dll')
+  [string]$BridgeBinary = (Join-Path $PSScriptRoot '..\x64\Release\SierraStudyAdvisorBridgeMT5.dll')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,13 +97,18 @@ $metaArgs = @(
 
 $process = Start-Process -FilePath $metaEditor -ArgumentList $metaArgs -NoNewWindow -PassThru -Wait
 $exitCode = $process.ExitCode
+$buildOk = $true
 if ($exitCode -ne 0) {
-  Write-Warning "MetaEditor exited with code $exitCode (see $logPath). Continuing if EX5 present."
+  Write-Warning "MetaEditor exited with code $exitCode (см. лог $logPath). Проверяю наличие EX5..."
+  $buildOk = $false
 }
 
 $compiledTempPath = [System.IO.Path]::ChangeExtension($targetSource, '.ex5')
 if (-not (Test-Path -LiteralPath $compiledTempPath)) {
   throw "Compilation finished but EX5 not found at $compiledTempPath"
+}
+if (-not $buildOk) {
+  Write-Warning "MetaEditor вернул код $exitCode, но EX5 найден. См. лог $logPath."
 }
 
 $outputExpertDir = Join-Path $OutputDir 'Experts'

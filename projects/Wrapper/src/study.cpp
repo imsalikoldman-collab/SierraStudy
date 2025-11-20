@@ -277,6 +277,11 @@ struct MirrorContext {
   int status_drawing_id = 0;
   bool last_pipe_connected = false;
   std::deque<std::string> pending_payloads;
+  /// @brief Последний обнаруженный стоп перед входом в режиме STOP_FIRST.
+  /// @note Заполняется только в состоянии flat и сбрасывается после использования.
+  std::optional<StopSnapshot> pending_stop_before_entry;
+  /// @brief Последнее зафиксированное количество контрактов (для контроля частичного закрытия).
+  double last_position_quantity = 0.0;
 };
 
 /// @brief Определяет состояние позиции на основе количества контрактов.
@@ -383,6 +388,24 @@ double DetermineReferencePrice(SCStudyGraphRef sc) {
   return 0.0;
 }
 
+/**
+ * @brief Вычисляет размер защитного стопа в пунктах.
+ * @param entry_price Цена входа позиции.
+ * @param stop_price Цена защитного стоп-ордера.
+ * @param tick_size Размер тика инструмента (не используется в расчёте, зарезервировано).
+ * @return double Абсолютное расстояние от входа до стопа в ценовых пунктах (price points).
+ * @note Используется разность цен без деления на TickSize, чтобы значение соответствовало визуальной метке
+ *       «сколько пунктов между входом и стопом» в Sierra.
+ * @warning Возвращает 0, если цена входа или стопа не задана (<=0).
+ */
+double ComputeStopDistancePoints(double entry_price, double stop_price, double tick_size) {
+  if (entry_price <= 0.0 || stop_price <= 0.0) {
+    return 0.0;
+  }
+  (void)tick_size;  // подавляем предупреждения об неиспользуемом параметре
+  return std::fabs(entry_price - stop_price);
+}
+
 /// @brief Ищет активный защитный стоп-ордер по символу и аккаунту.
 /// @param sc Контекст исследования.
 /// @param state Текущее состояние позиции.
@@ -436,6 +459,48 @@ std::optional<StopSnapshot> FindProtectiveStop(SCStudyGraphRef sc,
     return std::nullopt;
   }
   return best_snapshot;
+}
+
+/**
+ * @brief Отменяет все рабочие ордера по символу/аккаунту в Sierra Chart.
+ * @param sc Контекст исследования.
+ * @param symbol Символ инструмента.
+ * @param account Торговый аккаунт (может быть пустым — тогда отменяются ордера по умолчанию).
+ * @return int Количество отменённых ордеров.
+ * @note Используется при закрытии позиции, чтобы удалить оставшиеся стопы/лимиты.
+ * @warning Выполняется вслепую: снимает все рабочие ордера по символу/аккаунту, независимо от направления.
+ */
+int CancelWorkingOrdersForSymbol(SCStudyGraphRef sc, const SCString& symbol, const SCString& account) {
+  s_SCTradeOrder order{};
+  int order_index = 0;
+  int cancelled = 0;
+  const char* account_chars = account.IsEmpty() ? nullptr : account.GetChars();
+  const char* symbol_chars = symbol.GetChars();
+
+  while (sc.GetOrderForSymbolAndAccountByIndex(symbol_chars, account_chars, order_index, order) > 0) {
+    ++order_index;
+    if (!order.IsWorking()) {
+      continue;
+    }
+    sc.CancelOrder(order.InternalOrderID);
+    ++cancelled;
+  }
+  return cancelled;
+}
+
+/**
+ * @brief Усиливает закрытие: отменяет ордера и принудительно флеттит позицию по символу.
+ * @param sc Контекст исследования.
+ * @param symbol Символ инструмента.
+ * @param account Аккаунт.
+ * @return int Количество отменённых ордеров.
+ * @note Используется в режиме STOP_FIRST при частичном/полном срабатывании позиции.
+ * @warning Предполагается простая логика «1 лот / 1 стоп / 1 тейк». Выполняет FlattenPosition без доп. проверок.
+ */
+int ForceFlattenAndCancel(SCStudyGraphRef sc, const SCString& symbol, const SCString& account) {
+  const int cancelled = CancelWorkingOrdersForSymbol(sc, symbol, account);
+  sc.FlattenPosition();
+  return cancelled;
 }
 
 /// @brief Возвращает UNIX-время в миллисекундах.
@@ -804,7 +869,7 @@ void AppendCommonJsonFields(std::ostringstream& oss, const std::string& type,
                             const std::string& trade_id, const std::string& symbol,
                             const std::string& direction, const std::string& note) {
   oss << "\"type\":\"" << EscapeJson(type) << "\",";
-  oss << "\"trade_id\":\"" << EscapeJson(trade_id) << "\",";
+  oss << "\"id\":\"" << EscapeJson(trade_id) << "\",";
   oss << "\"symbol\":\"" << EscapeJson(symbol) << "\",";
   if (!direction.empty()) {
     oss << "\"direction\":\"" << EscapeJson(direction) << "\",";
@@ -816,17 +881,34 @@ void AppendCommonJsonFields(std::ostringstream& oss, const std::string& type,
   }
 }
 
-/// @brief Формирует JSON для OPEN_SIGNAL.
+/**
+ * @brief Формирует JSON для OPEN_SIGNAL.
+ * @param trade_id Идентификатор сделки.
+ * @param symbol Тикер инструмента в Sierra Chart.
+ * @param direction Направление сделки (`LONG`/`SHORT`).
+ * @param entry_price Цена входа.
+ * @param note Дополнительный текст из Input.
+ * @param stop_loss_points Размер стопа в пунктах (или std::nullopt, если поле не требуется).
+ * @return std::string Строка JSON с завершающим переводом строки.
+ * @note Все числовые поля форматируются с точностью до двух знаков после запятой.
+ * @warning Поле `stop_loss_points` добавляется только при наличии значения, клиент MT5 должен быть готов обрабатывать его отсутствие.
+ */
 std::string BuildOpenSignalJson(const std::string& trade_id,
                                 const std::string& symbol,
                                 const std::string& direction,
                                 double entry_price,
-                                const std::string& note) {
+                                const std::string& note,
+                                const std::optional<double>& stop_loss_points) {
   std::ostringstream oss;
   oss << "{";
   AppendCommonJsonFields(oss, "OPEN_SIGNAL", trade_id, symbol, direction, note);
   oss << std::fixed << std::setprecision(2);
   oss << ",\"entry_price\":" << entry_price;
+  if (stop_loss_points.has_value()) {
+    const double rounded =
+        std::round(*stop_loss_points * 100.0) / 100.0;  // два знака после запятой
+    oss << ",\"stop_loss_points\":" << rounded;
+  }
   oss << "}\n";
   return oss.str();
 }
@@ -1010,7 +1092,7 @@ SCSFExport scsf_SierraStudyBridge(SCStudyGraphRef sc) {
 
     mode_input.Name = "Bridge Mode";
     mode_input.SetCustomInputStrings("ENTRY_FIRST;STOP_FIRST");
-    mode_input.SetCustomInputIndex(static_cast<int>(BridgeMode::kEntryFirst));
+    mode_input.SetCustomInputIndex(static_cast<int>(BridgeMode::kStopFirst));
 
     close_reason_input.Name = "Close Reason";
     close_reason_input.SetCustomInputStrings("signal;manual;flatten");
@@ -1084,67 +1166,81 @@ SCSFExport scsf_SierraStudyBridge(SCStudyGraphRef sc) {
   ctx->last_price = reference_price;
   const double price_epsilon = (sc.TickSize > 0.0) ? sc.TickSize * 0.25 : 1e-6;
 
+  // В STOP_FIRST при любом уменьшении позиции инициируем принудительное закрытие и снятие ордеров.
+  if (bridge_mode == BridgeMode::kStopFirst && previous_state != PositionState::kFlat) {
+    const double prev_qty = ctx->last_position_quantity;
+    const double curr_qty = quantity;
+    const double kQtyEps = 1e-6;
+    if (std::fabs(curr_qty) + kQtyEps < std::fabs(prev_qty)) {
+      const int cancelled = ForceFlattenAndCancel(sc, sc.Symbol, sc.SelectedTradeAccount);
+      if (cancelled > 0) {
+        std::ostringstream cancel_log;
+        cancel_log << "SierraStudyBridge: частичное/полное срабатывание, отменено ордеров: "
+                   << cancelled;
+        sc.AddMessageToLog(cancel_log.str().c_str(), 0);
+      }
+      // После flatten позиция станет flat, оставшаяся логика закроет TradeState через CLOSE_SIGNAL.
+    }
+  }
+
   const auto stop_snapshot = FindProtectiveStop(sc, current_state, reference_price);
 
-  if (bridge_mode == BridgeMode::kStopFirst) {
-    if (!stop_snapshot.has_value()) {
-      if (ctx->trade.stop_sent && !ctx->trade.entry_sent) {
-        sc.AddMessageToLog(
-            "SierraStudyBridge: стоп был удалён до входа, текущий TradeID сброшен.", 1);
-        ctx->trade.Reset();
-      }
+  if (bridge_mode == BridgeMode::kStopFirst && current_state == PositionState::kFlat) {
+    if (stop_snapshot.has_value()) {
+      ctx->pending_stop_before_entry = stop_snapshot;
     } else {
-      const auto& snapshot = stop_snapshot.value();
-      const bool is_new_stop =
-          !ctx->trade.stop_sent || snapshot.internal_id != ctx->trade.last_stop_internal_id ||
-          std::fabs(snapshot.price - ctx->trade.last_stop_price) > price_epsilon;
-      if (is_new_stop) {
-        if (ctx->trade.id.empty()) {
-          ctx->trade.direction = DetermineDirectionFromStop(snapshot, reference_price);
-          ctx->trade.id = GenerateTradeId(symbol, ctx->trade.direction);
-        } else if (ctx->trade.direction.empty()) {
-          ctx->trade.direction = DetermineDirectionFromStop(snapshot, reference_price);
-        }
-        const std::string payload =
-            BuildStopOnlyJson(ctx->trade.id, symbol, ctx->trade.direction, snapshot.price, note);
-        std::ostringstream log;
-        log << "[bridge] STOP_ONLY trade_id=" << ctx->trade.id << " price=" << snapshot.price;
-        EnqueueBridgePayload(sc, ctx, payload, log.str());
-        ctx->trade.stop_sent = true;
-        ctx->trade.last_stop_price = snapshot.price;
-        ctx->trade.last_stop_internal_id = snapshot.internal_id;
-      }
+      ctx->pending_stop_before_entry.reset();
     }
   }
 
   if (previous_state == PositionState::kFlat && current_state != PositionState::kFlat) {
-    if (bridge_mode == BridgeMode::kStopFirst && ctx->trade.stop_sent && !ctx->trade.entry_sent &&
-        !ctx->trade.id.empty()) {
-      ctx->trade.direction = DirectionFromState(current_state);
-      ctx->trade.last_entry_price = average_price;
-      const std::string payload = BuildEntryAfterStopJson(
-          ctx->trade.id, symbol, ctx->trade.direction, average_price, note);
-      std::ostringstream log;
-      log << "[bridge] ENTRY_AFTER_STOP trade_id=" << ctx->trade.id
-          << " price=" << average_price;
-      EnqueueBridgePayload(sc, ctx, payload, log.str());
-      ctx->trade.entry_sent = true;
+    ctx->trade.Reset();
+    ctx->trade.direction = DirectionFromState(current_state);
+
+    if (bridge_mode == BridgeMode::kStopFirst) {
+      std::optional<StopSnapshot> entry_stop =
+          ctx->pending_stop_before_entry.has_value() ? ctx->pending_stop_before_entry
+                                                     : stop_snapshot;
+      if (!entry_stop.has_value()) {
+        sc.AddMessageToLog(
+            "SierraStudyBridge: вход в режиме STOP_FIRST без предварительного стоп-ордера, OPEN_SIGNAL "
+            "не отправлен.",
+            1);
+      } else if (!DirectionMatchesStop(ctx->trade.direction, entry_stop->side)) {
+        sc.AddMessageToLog(
+            "SierraStudyBridge: сторона стоп-ордера не совпала с направлением входа, OPEN_SIGNAL пропущен.",
+            1);
+      } else {
+        ctx->trade.id = GenerateTradeId(symbol, ctx->trade.direction);
+        ctx->trade.last_entry_price = average_price;
+        ctx->trade.last_stop_price = entry_stop->price;
+        ctx->trade.last_stop_internal_id = entry_stop->internal_id;
+        const double stop_points =
+            ComputeStopDistancePoints(ctx->trade.last_entry_price, ctx->trade.last_stop_price, sc.TickSize);
+        const std::optional<double> stop_points_opt(stop_points);
+        const std::string payload = BuildOpenSignalJson(ctx->trade.id, symbol, ctx->trade.direction,
+                                                        ctx->trade.last_entry_price, note, stop_points_opt);
+        std::ostringstream log;
+        log << "[bridge] OPEN_SIGNAL trade_id=" << ctx->trade.id
+            << " price=" << ctx->trade.last_entry_price;
+        log << " stop_pts=" << stop_points;
+        EnqueueBridgePayload(sc, ctx, payload, log.str());
+        ctx->trade.entry_sent = true;
+        ctx->trade.stop_sent = true;
+      }
+      ctx->pending_stop_before_entry.reset();
     } else {
       ctx->trade.Reset();
       ctx->trade.direction = DirectionFromState(current_state);
       ctx->trade.id = GenerateTradeId(symbol, ctx->trade.direction);
       ctx->trade.last_entry_price = average_price;
       const std::string payload =
-          BuildOpenSignalJson(ctx->trade.id, symbol, ctx->trade.direction, average_price, note);
+          BuildOpenSignalJson(ctx->trade.id, symbol, ctx->trade.direction, average_price, note,
+                              std::nullopt);
       std::ostringstream log;
       log << "[bridge] OPEN_SIGNAL trade_id=" << ctx->trade.id << " price=" << average_price;
       EnqueueBridgePayload(sc, ctx, payload, log.str());
       ctx->trade.entry_sent = true;
-      if (bridge_mode == BridgeMode::kStopFirst) {
-        sc.AddMessageToLog(
-            "SierraStudyBridge: вход в режиме STOP_FIRST выполнен без предварительного стопа.",
-            1);
-      }
     }
   }
 
@@ -1172,7 +1268,7 @@ SCSFExport scsf_SierraStudyBridge(SCStudyGraphRef sc) {
     if (ctx->trade.direction.empty()) {
       ctx->trade.direction = DirectionFromState(previous_state);
     }
-    if (!ctx->trade.stop_sent) {
+    if (bridge_mode == BridgeMode::kEntryFirst && !ctx->trade.stop_sent) {
       sc.AddMessageToLog(
           "SierraStudyBridge: после входа не был обнаружен защитный стоп, отправляем CLOSE_SIGNAL "
           "без подтверждённого стопа.",
@@ -1184,10 +1280,20 @@ SCSFExport scsf_SierraStudyBridge(SCStudyGraphRef sc) {
     log << "[bridge] CLOSE_SIGNAL trade_id=" << ctx->trade.id
         << " price=" << reference_price;
     EnqueueBridgePayload(sc, ctx, payload, log.str());
+
+    const int cancelled =
+        CancelWorkingOrdersForSymbol(sc, sc.Symbol, sc.SelectedTradeAccount);
+    if (cancelled > 0) {
+      std::ostringstream cancel_log;
+      cancel_log << "SierraStudyBridge: закрытие сделки, отменено рабочих ордеров: " << cancelled;
+      sc.AddMessageToLog(cancel_log.str().c_str(), 0);
+    }
+    ctx->pending_stop_before_entry.reset();
     ctx->trade.Reset();
   }
 
   ctx->last_position_state = current_state;
+  ctx->last_position_quantity = quantity;
 
   FlushPendingPayloads(ctx);
   UpdatePipeStatusOverlay(sc, ctx);

@@ -84,35 +84,45 @@ function Format-BridgeMessage {
     return [string]::Format('{0:F2}', [double]$value)
   }
 
+  $formatPoints = {
+    param($value)
+    if ($value -eq $null) { return '-' }
+    return [string]::Format('{0:F2}', [double]$value)
+  }
+
   $noteSuffix = if ($payload.PSObject.Properties.Name -contains 'note' -and $payload.note) {
     " note='$($payload.note)'"
   } else {
     ""
   }
 
+  $id = $payload.id
   switch ($payload.type) {
     'OPEN_SIGNAL' {
-      $text = "OPEN_SIGNAL trade_id=$($payload.trade_id) dir=$($payload.direction) entry=$(&$formatPrice $payload.entry_price)$noteSuffix"
+      $sl = if ($payload.PSObject.Properties.Name -contains 'stop_loss_points') {
+        " sl_pts=$(&$formatPoints $payload.stop_loss_points)"
+      } else { "" }
+      $text = "OPEN_SIGNAL id=$id dir=$($payload.direction) entry=$(&$formatPrice $payload.entry_price)$sl$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Green' }
     }
     'ENTRY_AFTER_STOP' {
-      $text = "ENTRY_AFTER_STOP trade_id=$($payload.trade_id) dir=$($payload.direction) entry=$(&$formatPrice $payload.entry_price)$noteSuffix"
+      $text = "ENTRY_AFTER_STOP id=$id dir=$($payload.direction) entry=$(&$formatPrice $payload.entry_price)$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Green' }
     }
     'STOP_ONLY' {
-      $text = "STOP_ONLY trade_id=$($payload.trade_id) dir=$($payload.direction) stop=$(&$formatPrice $payload.stop_price) mode=$($payload.mode)$noteSuffix"
+      $text = "STOP_ONLY id=$id dir=$($payload.direction) stop=$(&$formatPrice $payload.stop_price) mode=$($payload.mode)$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Yellow' }
     }
     'STOP_LEVEL' {
-      $text = "STOP_LEVEL trade_id=$($payload.trade_id) dir=$($payload.direction) stop=$(&$formatPrice $payload.stop_price) mode=$($payload.mode)$noteSuffix"
+      $text = "STOP_LEVEL id=$id dir=$($payload.direction) stop=$(&$formatPrice $payload.stop_price) mode=$($payload.mode)$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Yellow' }
     }
     'CLOSE_SIGNAL' {
-      $text = "CLOSE_SIGNAL trade_id=$($payload.trade_id) dir=$($payload.direction) close=$(&$formatPrice $payload.close_price) reason=$($payload.close_reason)$noteSuffix"
+      $text = "CLOSE_SIGNAL id=$id dir=$($payload.direction) close=$(&$formatPrice $payload.close_price) reason=$($payload.close_reason)$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Cyan' }
     }
     default {
-      $text = "$($payload.type) trade_id=$($payload.trade_id)$noteSuffix"
+      $text = "$($payload.type) id=$id$noteSuffix"
       return [pscustomobject]@{ Text = "[$timestamp] $text"; Color = 'Yellow' }
     }
   }

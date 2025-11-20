@@ -1,12 +1,12 @@
 #property copyright   "SierraStudy"
-#property version     "1.0"
+#property version     "1.1"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 /**
- * @brief Советник, который зеркалирует позиции из Sierra Chart в MT5.
- * @note Объём рассчитывается как процент от баланса согласно InpRiskPercent.
+ * @brief Советник, который зеркалирует сигналы OPEN/CLOSE из Sierra Chart в MT5.
+ * @note Объём рассчитывается как процент от депозита по размеру стопа из OPEN_SIGNAL.
  */
 
 #import "SierraStudyAdvisorBridgeMT5.dll"
@@ -16,32 +16,40 @@ int  SierraPipeWrite(const uchar& data[], int size);
 int  SierraPipeRead(uchar& buffer[], int size, int timeout_ms);
 #import
 
-input string InpPipeName        = "\\\\.\\pipe\\SierraStudyAdvisor"; // Имя pipe.
-input int    InpPollIntervalMs  = 200;                               // Таймаут чтения.
-input bool   InpAutoConnect     = true;                              // Подключаться автоматически.
-input double InpRiskPercent     = 1.0;                               // Риск на сделку (% депозита).
-input double InpSlippagePoints  = 5;                                 // Допустимое отклонение (пункты).
-input long   InpMagicNumber     = 86001;                             // Magic для идентификации позиций.
-input string InpFallbackSymbol  = "";                                // Символ по умолчанию (если пусто, берём _Symbol).
-input double InpFallbackStopPoints = 50;                              // Резервный стоп (пункты MT5), если в сообщении stop отсутствует.
+input string InpPipeName            = "\\\\.\\pipe\\SierraStudyAdvisor"; // Имя pipe.
+input int    InpPollIntervalMs      = 200;                               // Таймаут чтения.
+input bool   InpAutoConnect         = true;                              // Подключаться автоматически.
+input double InpRiskPercent         = 2.0;                               // Риск на сделку (% депозита).
+input double InpProtectiveSLPercent = 7.0;                               // Защитный стоп по equity (% депо).
+input double InpProtectiveTPPercent = 21.0;                              // Защитный тейк по equity (% депо).
+input double InpSlippagePoints      = 5;                                 // Допустимое отклонение (пункты).
+input long   InpMagicNumber         = 86001;                             // Magic для идентификации позиций.
+input string InpFallbackSymbol      = "";                                // Символ по умолчанию (если пусто, берём _Symbol).
+input double InpFallbackStopPoints  = 50;                                // Резервный стоп (пункты MT5), если нет стопа.
+input ENUM_BASE_CORNER InpHudCorner = CORNER_RIGHT_LOWER;                // Угол для справочной таблицы.
 
 bool   g_connected = false;
 uchar  g_buffer[4096];
 CTrade g_trade;
 
+string g_activeId     = "";
+string g_activeSymbol = "";
+double g_entryEquity  = 0.0;
+string g_lastMessage  = "";
+datetime g_lastMsgTime = 0;
+
 //--- структуры
 struct SierraSignal
 {
+   string type;
+   string id;
    string symbol;
    string direction;
-   string status;
    string note;
-   double entry;
-   double stop;
-   double take;
-   bool   has_take;
-   bool   has_stop;
-   double offset;
+   double entry_price;
+   double stop_points;
+   bool   has_stop_points;
+   double close_price;
 };
 
 //--- утилиты JSON
@@ -51,41 +59,53 @@ bool  ExtractNumberField(const string text, const string key, double &value);
 bool  ExtractObjectRange(const string text, const string key, string &objectText);
 
 //--- логика
-bool ParseSignal(const string payload, SierraSignal &signal);
-void ProcessSignal(const SierraSignal &signal);
-bool EnsureSymbol(string &symbol);
-double CalculateVolume(const string symbol, double entryPrice, double stopPrice);
+bool   ParseSignal(const string payload, SierraSignal &signal);
+void   ProcessSignal(const SierraSignal &signal);
+bool   EnsureSymbol(string &symbol);
+double CalculateVolumeByRisk(const string symbol, double stopDistancePoints);
 double NormalizeVolume(double volume, double step, double minLot, double maxLot);
 ENUM_POSITION_TYPE DirectionToPositionType(const string direction);
-bool PositionInfo(const string symbol, ENUM_POSITION_TYPE &type, double &volume);
-bool EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double entryPrice, double stopPrice,
-                    double takePrice, const string comment);
-bool UpdateStops(const string symbol, double stopPrice, double takePrice);
-bool ClosePosition(const string symbol);
+bool   PositionInfo(const string symbol, ENUM_POSITION_TYPE &type, double &volume);
+bool   EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double entryPrice,
+                      double stopDistancePoints, const string comment);
+bool   UpdateStops(const string symbol, double stopPrice);
+bool   ClosePosition(const string symbol, bool clearState);
+void   UpdateHud(const string status);
+void   CheckProtectiveEquityStops();
 string Trim(const string value);
 string ToLowerCase(string value);
 bool DoubleEquals(const double a, const double b, const double eps = 1e-6);
 
 int OnInit()
 {
-   g_trade.SetExpertMagicNumber((int)InpMagicNumber);
-   g_trade.SetDeviationInPoints((ulong)MathMax(0.0, InpSlippagePoints));
+  g_trade.SetExpertMagicNumber((int)InpMagicNumber);
+  g_trade.SetDeviationInPoints((ulong)MathMax(0.0, InpSlippagePoints));
 
-   if(InpAutoConnect)
-      g_connected = (SierraPipeConnect(InpPipeName) == 1);
+  if(InpAutoConnect)
+  {
+     const int res = SierraPipeConnect(InpPipeName);
+     g_connected = (res == 1);
+     if(!g_connected)
+        PrintFormat("SierraStudy Advisor: pipe connect failed (res=%d)", res);
+  }
 
-   PrintFormat("SierraStudy Advisor initialized (pipe=%s, connected=%s)",
-               InpPipeName, g_connected ? "true" : "false");
-   return(INIT_SUCCEEDED);
+  PrintFormat("SierraStudy Advisor initialized (pipe=%s, connected=%s)",
+              InpPipeName, g_connected ? "true" : "false");
+  UpdateHud("init");
+  return(INIT_SUCCEEDED);
 }
 
 void OnTick()
 {
-   if(!g_connected && InpAutoConnect)
-   {
-      g_connected = (SierraPipeConnect(InpPipeName) == 1);
+  if(!g_connected && InpAutoConnect)
+  {
+      const int res = SierraPipeConnect(InpPipeName);
+      g_connected = (res == 1);
       if(!g_connected)
+      {
+         UpdateHud("no-conn");
          return;
+      }
    }
 
    // читаем несколько сообщений за тик
@@ -114,7 +134,12 @@ void OnTick()
          continue;
       }
       ProcessSignal(signal);
+      g_lastMsgTime = TimeCurrent();
+      g_lastMessage = signal.type;
    }
+
+   CheckProtectiveEquityStops();
+   UpdateHud("ok");
 }
 
 void OnDeinit(const int reason)
@@ -122,6 +147,7 @@ void OnDeinit(const int reason)
    if(g_connected)
       SierraPipeClose();
    g_connected = false;
+   ObjectDelete(0, "SierraStudyHud");
    Print("SierraStudy Advisor stopped.");
 }
 
@@ -137,51 +163,71 @@ void ProcessSignal(const SierraSignal &signal)
    if(!EnsureSymbol(symbol))
       return;
 
-   double entryPrice = signal.entry + signal.offset;
-   double stopPrice  = signal.has_stop ? signal.stop + signal.offset : 0.0;
-   double takePrice  = signal.has_take ? signal.take + signal.offset : 0.0;
-
-   const string status = ToLowerCase(signal.status);
-
-   if(status == "open")
+   const string type = ToLowerCase(signal.type);
+   g_lastMessage     = signal.type;
+   if(type == "open_signal")
    {
+      if(signal.entry_price <= 0.0)
+      {
+         Print("Entry price missing, skip OPEN_SIGNAL.");
+         return;
+      }
+      const ENUM_POSITION_TYPE targetType = DirectionToPositionType(signal.direction);
+      if(targetType != POSITION_TYPE_BUY && targetType != POSITION_TYPE_SELL)
+      {
+         PrintFormat("Unknown direction '%s' in payload.", signal.direction);
+         return;
+      }
+
+      const double stopDist = (signal.has_stop_points ? signal.stop_points
+                                                      : InpFallbackStopPoints * SymbolInfoDouble(symbol, SYMBOL_POINT));
+      if(stopDist <= 0.0)
+      {
+         Print("Stop distance is zero, skip entry.");
+         return;
+      }
+
+      // Если уже есть позиция с другим направлением или id — закроем её.
+      ENUM_POSITION_TYPE currentType;
+      double currentVolume = 0.0;
+      if(PositionInfo(symbol, currentType, currentVolume))
+      {
+         if(currentType != targetType || (g_activeId != "" && g_activeId != signal.id))
+            ClosePosition(symbol, true);
+      }
+
+      if(EnsurePosition(symbol, targetType, signal.entry_price, stopDist, signal.note))
+      {
+         g_activeId      = signal.id;
+         g_activeSymbol  = symbol;
+         g_entryEquity   = AccountInfoDouble(ACCOUNT_EQUITY);
+      }
+   }
+   else if(type == "stop_level")
+   {
+      if(!PositionSelect(symbol))
+         return;
+      // Для ENTRY_FIRST — обновление стопа.
       const ENUM_POSITION_TYPE targetType = DirectionToPositionType(signal.direction);
       if(targetType == POSITION_TYPE_BUY || targetType == POSITION_TYPE_SELL)
       {
-         if(MathAbs(entryPrice - stopPrice) <= 0.0)
+         const double stopDist = signal.has_stop_points ? signal.stop_points : 0.0;
+         if(stopDist > 0.0)
          {
-            const double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-            const double fallback = MathMax(point, InpFallbackStopPoints * point);
-            stopPrice = (targetType == POSITION_TYPE_BUY) ? (entryPrice - fallback)
-                                                          : (entryPrice + fallback);
+            const double stopPrice = (targetType == POSITION_TYPE_BUY) ? (signal.entry_price - stopDist)
+                                                                       : (signal.entry_price + stopDist);
+            UpdateStops(symbol, stopPrice);
          }
-         EnsurePosition(symbol, targetType, entryPrice, stopPrice, takePrice, signal.note);
       }
-      else
-         PrintFormat("Unknown direction '%s' in payload.", signal.direction);
    }
-else if(status == "modify")
-{
-   if(MathAbs(entryPrice - stopPrice) <= 0.0)
+   else if(type == "close_signal")
    {
-      const double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-      const ENUM_POSITION_TYPE targetType = DirectionToPositionType(signal.direction);
-      const double fallback = MathMax(point, InpFallbackStopPoints * point);
-      if(targetType == POSITION_TYPE_SELL)
-         stopPrice = entryPrice + fallback;
-      else
-         stopPrice = entryPrice - fallback;
-   }
-
-   UpdateStops(symbol, stopPrice, takePrice);
-}
-   else if(status == "close")
-   {
-      ClosePosition(symbol);
+      if(g_activeId == "" || g_activeId == signal.id || signal.id == "")
+         ClosePosition(symbol, true);
    }
    else
    {
-      PrintFormat("Unsupported status '%s'.", signal.status);
+      PrintFormat("Unsupported type '%s'.", signal.type);
    }
 }
 
@@ -198,7 +244,7 @@ bool EnsureSymbol(string &symbol)
 }
 
 bool EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double entryPrice,
-                    double stopPrice, double takePrice, const string comment)
+                    double stopDistancePoints, const string comment)
 {
    ENUM_POSITION_TYPE currentType;
    double currentVolume = 0.0;
@@ -206,16 +252,18 @@ bool EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double e
    {
       if(currentType != targetType)
       {
-         ClosePosition(symbol);
+         ClosePosition(symbol, true);
       }
       else
       {
-         UpdateStops(symbol, stopPrice, takePrice);
+         const double stopPrice = (targetType == POSITION_TYPE_BUY) ? (entryPrice - stopDistancePoints)
+                                                                    : (entryPrice + stopDistancePoints);
+         UpdateStops(symbol, stopPrice);
          return true;
       }
    }
 
-   const double volume = CalculateVolume(symbol, entryPrice, stopPrice);
+   const double volume = CalculateVolumeByRisk(symbol, stopDistancePoints);
    if(volume <= 0.0)
    {
       Print("Volume calculation returned zero, skip entry.");
@@ -223,7 +271,9 @@ bool EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double e
    }
 
    const ENUM_ORDER_TYPE orderType = (targetType == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
-   if(!g_trade.PositionOpen(symbol, orderType, volume, 0.0, stopPrice, takePrice, comment))
+   const double stopPrice = (targetType == POSITION_TYPE_BUY) ? (entryPrice - stopDistancePoints)
+                                                              : (entryPrice + stopDistancePoints);
+   if(!g_trade.PositionOpen(symbol, orderType, volume, 0.0, stopPrice, 0.0, comment))
    {
       PrintFormat("PositionOpen failed (%s): %d", symbol, _LastError);
       return false;
@@ -231,24 +281,17 @@ bool EnsurePosition(const string symbol, ENUM_POSITION_TYPE targetType, double e
    return true;
 }
 
-bool UpdateStops(const string symbol, double stopPrice, double takePrice)
+bool UpdateStops(const string symbol, double stopPrice)
 {
    if(!PositionSelect(symbol))
       return false;
 
    double currentSL = PositionGetDouble(POSITION_SL);
-   double currentTP = PositionGetDouble(POSITION_TP);
 
-   bool needModify = false;
-   if(stopPrice > 0.0 && !DoubleEquals(currentSL, stopPrice))
-      needModify = true;
-   if(takePrice > 0.0 && !DoubleEquals(currentTP, takePrice))
-      needModify = true;
-
-   if(!needModify)
+   if(stopPrice <= 0.0 || DoubleEquals(currentSL, stopPrice))
       return true;
 
-   if(!g_trade.PositionModify(symbol, stopPrice, takePrice))
+   if(!g_trade.PositionModify(symbol, stopPrice, PositionGetDouble(POSITION_TP)))
    {
       PrintFormat("PositionModify failed (%s): %d", symbol, _LastError);
       return false;
@@ -256,7 +299,7 @@ bool UpdateStops(const string symbol, double stopPrice, double takePrice)
    return true;
 }
 
-bool ClosePosition(const string symbol)
+bool ClosePosition(const string symbol, bool clearState)
 {
    if(!PositionSelect(symbol))
       return true;
@@ -266,7 +309,73 @@ bool ClosePosition(const string symbol)
       PrintFormat("PositionClose failed (%s): %d", symbol, _LastError);
       return false;
    }
+   if(clearState)
+   {
+      g_activeId     = "";
+      g_activeSymbol = "";
+      g_entryEquity  = 0.0;
+   }
    return true;
+}
+
+void CheckProtectiveEquityStops()
+{
+   if(g_activeId == "" || g_entryEquity <= 0.0 || g_activeSymbol == "")
+      return;
+   if(!PositionSelect(g_activeSymbol))
+      return;
+
+   const double equity      = AccountInfoDouble(ACCOUNT_EQUITY);
+   const double lossTrigger = MathMax(0.0, InpProtectiveSLPercent) / 100.0;
+   const double takeTrigger = MathMax(0.0, InpProtectiveTPPercent) / 100.0;
+
+   const double drawdown = (equity - g_entryEquity) / g_entryEquity;
+   if(lossTrigger > 0.0 && drawdown <= -lossTrigger)
+   {
+      PrintFormat("Protective equity stop triggered (%.2f%%).", lossTrigger * 100.0);
+      ClosePosition(g_activeSymbol, true);
+   }
+   if(takeTrigger > 0.0 && drawdown >= takeTrigger)
+   {
+      PrintFormat("Protective equity take triggered (%.2f%%).", takeTrigger * 100.0);
+      ClosePosition(g_activeSymbol, true);
+   }
+}
+
+void UpdateHud(const string status)
+{
+   string lines = "";
+   lines += StringFormat("SierraStudy MT5 (%s)\n", status);
+   lines += StringFormat("Pipe: %s | Conn: %s\n", InpPipeName, g_connected ? "OK" : "OFF");
+   lines += StringFormat("Last: %s at %s\n",
+                         g_lastMessage == "" ? "-" : g_lastMessage,
+                         (g_lastMsgTime == 0 ? "-" : TimeToString(g_lastMsgTime, TIME_MINUTES | TIME_SECONDS)));
+   lines += StringFormat("ID: %s\n", g_activeId == "" ? "-" : g_activeId);
+
+   string posLine = "Pos: none";
+   if(g_activeSymbol != "" && PositionSelect(g_activeSymbol))
+   {
+      const ENUM_POSITION_TYPE pt = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      const double vol = PositionGetDouble(POSITION_VOLUME);
+      const double sl  = PositionGetDouble(POSITION_SL);
+      posLine = StringFormat("Pos: %s %.2f sl=%.2f", (pt == POSITION_TYPE_BUY ? "BUY" : "SELL"), vol, sl);
+   }
+   lines += posLine + "\n";
+
+   lines += StringFormat("Equity guard: SL=%.2f%% TP=%.2f%%", InpProtectiveSLPercent, InpProtectiveTPPercent);
+
+   const string objName = "SierraStudyHud";
+   if(ObjectFind(0, objName) == -1)
+   {
+      ObjectCreate(0, objName, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, objName, OBJPROP_FONTSIZE, 8);
+      ObjectSetString(0, objName, OBJPROP_FONT, "Consolas");
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, clrDimGray);
+      ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, 10);
+   }
+   ObjectSetInteger(0, objName, OBJPROP_CORNER, InpHudCorner);
+   ObjectSetString(0, objName, OBJPROP_TEXT, lines);
 }
 
 bool PositionInfo(const string symbol, ENUM_POSITION_TYPE &type, double &volume)
@@ -282,18 +391,17 @@ bool PositionInfo(const string symbol, ENUM_POSITION_TYPE &type, double &volume)
    return (volume > 0.0);
 }
 
-double CalculateVolume(const string symbol, double entryPrice, double stopPrice)
+double CalculateVolumeByRisk(const string symbol, double stopDistancePoints)
 {
-   const double riskFraction = MathMax(0.0, InpRiskPercent) / 100.0;
+   double riskPercent = InpRiskPercent;
+   riskPercent = MathMin(5.0, MathMax(0.5, MathRound(riskPercent * 2.0) / 2.0)); // шаг 0.5
+   const double riskFraction = MathMax(0.0, riskPercent) / 100.0;
    if(riskFraction <= 0.0)
       return 0.0;
 
-   double stopDistance = MathAbs(entryPrice - stopPrice);
+   double stopDistance = MathAbs(stopDistancePoints);
    if(stopDistance <= 0.0)
-   {
-      const double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-      stopDistance = MathMax(point, InpFallbackStopPoints * point);
-   }
+      return 0.0;
 
    if(stopDistance <= 0.0)
       return 0.0;
@@ -351,37 +459,29 @@ ENUM_POSITION_TYPE DirectionToPositionType(const string direction)
 //--- JSON helpers
 bool ParseSignal(const string payload, SierraSignal &signal)
 {
-   signal.has_take = false;
-   signal.has_stop = false;
-   signal.offset   = 0.0;
+   signal.has_stop_points = false;
+   signal.stop_points     = 0.0;
+   signal.entry_price     = 0.0;
+   signal.close_price     = 0.0;
+   signal.type            = "";
+   signal.id              = "";
 
+   ExtractStringField(payload, "type", signal.type);
+   ExtractStringField(payload, "id", signal.id);
    ExtractStringField(payload, "symbol", signal.symbol);
    ExtractStringField(payload, "direction", signal.direction);
-   ExtractStringField(payload, "status", signal.status);
    ExtractStringField(payload, "note", signal.note);
-   ExtractNumberField(payload, "offset", signal.offset);
+   ExtractNumberField(payload, "entry_price", signal.entry_price);
+   ExtractNumberField(payload, "close_price", signal.close_price);
 
-   string entryObj;
-   if(ExtractObjectRange(payload, "entry", entryObj) && ExtractNumberField(entryObj, "price", signal.entry))
+   double stopPoints = 0.0;
+   if(ExtractNumberField(payload, "stop_loss_points", stopPoints))
    {
-      // ok
-   }
-   else
-   {
-      return false;
+      signal.has_stop_points = true;
+      signal.stop_points     = stopPoints;
    }
 
-   string stopObj;
-   if(ExtractObjectRange(payload, "stop", stopObj) && ExtractNumberField(stopObj, "price", signal.stop))
-   {
-      signal.has_stop = true;
-   }
-
-   string takeObj;
-   if(ExtractObjectRange(payload, "take", takeObj) && ExtractNumberField(takeObj, "price", signal.take))
-      signal.has_take = true;
-
-   return (signal.direction != "" && signal.status != "");
+   return (signal.type != "" && signal.direction != "");
 }
 
 int SkipSpaces(const string text, int index)

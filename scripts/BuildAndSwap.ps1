@@ -28,6 +28,7 @@ param(
   [switch]$SkipTests,
 
   [switch]$NoHotSwap,
+  [switch]$BuildAdvisor,
 
   [string]$Platform = 'x64',
 
@@ -110,5 +111,28 @@ if (-not $NoHotSwap) {
   }
 } else {
   Write-Warning 'Hot-swap disabled by -NoHotSwap.'
+}
+
+# Compile MT5 advisor and copy bridge DLL if requested.
+if ($BuildAdvisor) {
+  # Для этой машины используем фиксированный путь, если переменная не задана.
+  $defaultMt5DataDir = 'C:\Users\admin\AppData\Roaming\MetaQuotes\Terminal\29E91DA909EB4475AB204481D1C2CE7D'
+  $mt5DataDir = if ($env:MT5_DATA_DIR) { $env:MT5_DATA_DIR } elseif (Test-Path -LiteralPath $defaultMt5DataDir) { $defaultMt5DataDir } else { $null }
+
+  if (-not $mt5DataDir) {
+    Write-Warning 'MT5_DATA_DIR is not set and fallback path not found. Skipping advisor compilation.'
+  } else {
+    $env:MT5_DATA_DIR = $mt5DataDir
+    $compileAdvisorScript = Join-Path $PSScriptRoot 'CompileAdvisor.ps1'
+    if (-not (Test-Path -LiteralPath $compileAdvisorScript)) {
+      Write-Warning "CompileAdvisor script not found: $compileAdvisorScript"
+    } else {
+      & pwsh -NoProfile -File $compileAdvisorScript `
+        -Source (Join-Path $PSScriptRoot '..\projects\Advisor\src\SierraStudyAdvisor.mq5') `
+        -OutputDir (Join-Path $PSScriptRoot '..\out\mt5') `
+        -Mt5DataDir $mt5DataDir `
+        -BridgeBinary (Join-Path $PSScriptRoot '..\x64\Release\SierraStudyAdvisorBridgeMT5.dll')
+    }
+  }
 }
 
