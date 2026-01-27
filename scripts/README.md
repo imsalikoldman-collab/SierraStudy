@@ -37,6 +37,7 @@ pwsh -File scripts\ `BuildAndSwap.ps1`  -Configuration Release -RemoteHotSwap -S
 
 ### Примечания
 - По умолчанию  `BuildAndSwap.ps1`  при обнаружении блокировки файла пытается выполнить удалённый сценарий Release/Allow. Отключить поведение можно ключом  `-DisableRemoteFallback` .
+- Если Sierra Chart держит DLL, можно сразу запускать `HotSwap.ps1 -UseRemoteRelease` — скрипт отправит RELEASE/ALLOW и скопирует временный файл вместо блокированного.
 
 
 
