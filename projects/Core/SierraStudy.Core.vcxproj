@@ -56,9 +56,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\sierra\core\moving_average.hpp" />
+    <ClInclude Include="include\sierra\core\spotgamma.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\moving_average.cpp" />
+    <ClCompile Include="src\spotgamma.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -27,6 +27,12 @@ SierraStudy — шаблон репозитория для пользовате�
 3. Копирование DLL: `scripts\HotSwap.ps1`.
 4. Проверка в Sierra Chart и коммит.
 
+## SpotGamma Levels
+- Исследование `SpotGamma Levels` парсит одну CSV-строку SpotGamma (SG-ROW-FMT-001) и строит 12 горизонтальных уровней для ES/NQ (fallback на ES1!/NQ1! при месячных кодах и микро ES/NQ).
+- Настройки: включение стади, строка CSV, флаги `Draw Lines` / `Show Legend` / `Show Labels`, стили линий по группам (Walls/Triggers, Large Gamma, Combo), размер шрифта легенды.
+- Линии обновляются по стабильным LineNumber без дублей; уровни со значением 0 не рисуются.
+- Легенда в правом верхнем углу выводит Level ID и цену в формате графика.
+
 ## Зависимости
 - **Google Test** — находится в `third_party/googletest` (подмодуль или ручная копия).
 - **plog** — header-only логгер в `third_party/plog`.

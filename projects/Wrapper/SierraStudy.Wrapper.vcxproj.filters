@@ -12,11 +12,17 @@
     <ClInclude Include="include\sierra\acsil\study.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\sierra\acsil\spotgamma_levels.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="include\sierra\acsil\supportFunction.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\SpotGammaLevelsStudy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\study.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

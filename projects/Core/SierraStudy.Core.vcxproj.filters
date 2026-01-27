@@ -12,9 +12,15 @@
     <ClInclude Include="include\sierra\core\moving_average.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\sierra\core\spotgamma.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\moving_average.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\spotgamma.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
