@@ -72,6 +72,20 @@ std::string FormatExposure(double value) {
   return oss.str();
 }
 
+/// @brief Маскирует значение API key в URL для безопасного логирования.
+std::string MaskApiKey(const std::string& url) {
+  const std::string key_param = "key=";
+  const std::size_t pos = url.find(key_param);
+  if (pos == std::string::npos) {
+    return url;
+  }
+  std::size_t value_pos = pos + key_param.size();
+  std::size_t end = url.find_first_of("&", value_pos);
+  std::string masked = url;
+  masked.replace(value_pos, (end == std::string::npos ? masked.size() : end) - value_pos, "******");
+  return masked;
+}
+
 /// @brief Создаёт или возвращает вектор идентификаторов линий, сохранённый в persistent.
 std::vector<int>* GetOrCreateDrawnLinesCache(SCStudyGraphRef sc) {
   auto* ptr = reinterpret_cast<std::vector<int>*>(sc.GetPersistentPointer(kPersistDrawnLinesPtr));
@@ -259,7 +273,7 @@ void RenderLevels(SCStudyGraphRef sc,
  * @param sc Контекст Sierra Chart.
  * @return void.
  * @note Логика: state-machine HTTP → парсинг JSON в Core → отрисовка отрезков и подписей справа на графике.
- * @warning Требуется задать API Key и поддерживаемый тикер графика (ES/MES/NQ/MNQ). Частота запросов 5–30 сек.
+ * @warning Требуется задать API Key и поддерживаемый тикер графика: ES/MES → ES_SPX; NQ/MNQ → NQ_NDX (другие сервер не принимает). Частота запросов 5–30 сек.
  */
 SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
   sierra::acsil::LogDllStartup(sc);
@@ -417,6 +431,10 @@ SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
   if (request_state == kIdle && seconds_since_last_request >= static_cast<double>(update_period)) {
     SCString url;
     url.Format("https://api.gexbot.com/%s/state/%s?key=%s", ticker.c_str(), gamma_type.c_str(), api_key.c_str());
+    const std::string url_masked = MaskApiKey(ToStd(url));
+
+    // сбрасываем старый буфер ответа перед новым запросом
+    sc.HTTPResponse = "";
 
     if (!sc.MakeHTTPRequest(url)) {
       if (ShouldLog(sc, now_seconds)) {
@@ -427,10 +445,11 @@ SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
     } else {
       request_state = kRequestSent;
       last_request_time = now_seconds;
+      last_request_sent_time = now_seconds;
       show_status("● нет ответа", RGB(255, 215, 0));
-      if (debug && ShouldLog(sc, now_seconds)) {
+      if (ShouldLog(sc, now_seconds)) {
         SCString msg;
-        msg.Format("Gexbot gamma: запрос отправлен %s", url.GetChars());
+        msg.Format("Gexbot gamma: запрос отправлен %s", url_masked.c_str());
         sc.AddMessageToLog(msg, 0);
       }
     }
@@ -454,10 +473,13 @@ SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
   }
 
   if (sc.HTTPResponse.GetLength() == 0) {
-    // Если истёк период опроса и ответа нет — считаем тайм‑аутом.
-    if (now_seconds - last_request_sent_time >= static_cast<double>(update_period)) {
+    // Если истёк период опроса и ответа нет — считаем тайм‑аутом и сбрасываем запрос.
+    const double wait_time = now_seconds - last_request_sent_time;
+    if (wait_time >= static_cast<double>(update_period)) {
       if (ShouldLog(sc, now_seconds)) {
-        sc.AddMessageToLog("Gexbot gamma: нет ответа", 1);
+        SCString msg;
+        msg.Format("Gexbot gamma: нет ответа (ожидали %.1f сек)", wait_time);
+        sc.AddMessageToLog(msg, 1);
       }
       request_state = kIdle;
     }
@@ -475,6 +497,14 @@ SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
     }
     show_status("● нет ответа", RGB(255, 215, 0));
     return;
+  }
+
+  if (ShouldLog(sc, now_seconds)) {
+    const std::string prefix = response.substr(0, 50);
+    SCString msg;
+    msg.Format("Gexbot gamma: ответ получен, bytes=%d, prefix='%s'", static_cast<int>(response.size()),
+               prefix.c_str());
+    sc.AddMessageToLog(msg, 0);
   }
 
   GammaResponse parsed{};
@@ -529,9 +559,10 @@ SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc) {
     msg.Format("Gexbot gamma: OK timestamp=%lld levels=%d", static_cast<long long>(parsed.timestamp),
                static_cast<int>(parsed.levels.size()));
     sc.AddMessageToLog(msg, 0);
-    // Логируем сырой ответ для отладки (осторожно: может быть длинным).
+    // Логируем первые 50 символов ответа для трассировки без избыточности.
+    const std::string prefix = response.substr(0, 50);
     SCString raw;
-    raw = response.c_str();
+    raw = prefix.c_str();
     sc.AddMessageToLog(raw, 0);
   }
   show_status("● ОК", RGB(0, 180, 90));

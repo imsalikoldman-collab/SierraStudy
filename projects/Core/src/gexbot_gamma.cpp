@@ -199,10 +199,10 @@ std::vector<GammaLevel> ParseMiniContracts(const std::string& json, std::size_t 
 std::string MapChartSymbolToGexbotTicker(const std::string& chart_symbol) {
   const std::string upper = ToUpper(chart_symbol);
   if (upper.rfind("ES", 0) == 0 || upper.rfind("MES", 0) == 0) {
-    return "SPX";
+    return "ES_SPX";
   }
   if (upper.rfind("NQ", 0) == 0 || upper.rfind("MNQ", 0) == 0) {
-    return "NDX";
+    return "NQ_NDX";
   }
   return {};
 }

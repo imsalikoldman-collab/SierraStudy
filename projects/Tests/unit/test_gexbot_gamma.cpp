@@ -20,7 +20,7 @@ using sierra::core::ParseGexbotGammaResponse;
 const char* kSampleJson = R"json(
 {
   "timestamp": 1700000000,
-  "ticker": "SPX",
+  "ticker": "ES_SPX",
   "spot": 4800.5,
   "mini_contracts": [
     [4800, null, null, -12.0, [1,2]],
@@ -33,10 +33,10 @@ const char* kSampleJson = R"json(
 )json";
 
 TEST(GexbotTickerMap, MapsKnownFutures) {
-  EXPECT_EQ(MapChartSymbolToGexbotTicker("ESZ24"), "SPX");
-  EXPECT_EQ(MapChartSymbolToGexbotTicker("mesm25"), "SPX");
-  EXPECT_EQ(MapChartSymbolToGexbotTicker("NQH25"), "NDX");
-  EXPECT_EQ(MapChartSymbolToGexbotTicker("mnqz24"), "NDX");
+  EXPECT_EQ(MapChartSymbolToGexbotTicker("ESZ24"), "ES_SPX");
+  EXPECT_EQ(MapChartSymbolToGexbotTicker("mesm25"), "ES_SPX");
+  EXPECT_EQ(MapChartSymbolToGexbotTicker("NQH25"), "NQ_NDX");
+  EXPECT_EQ(MapChartSymbolToGexbotTicker("mnqz24"), "NQ_NDX");
 }
 
 TEST(GexbotTickerMap, RejectsUnknown) {
@@ -48,7 +48,7 @@ TEST(GexbotParser, FiltersPositiveGammaAndSorts) {
   GammaResponse response = ParseGexbotGammaResponse(kSampleJson, /*max_levels=*/2);
 
   EXPECT_EQ(response.timestamp, 1700000000);
-  EXPECT_EQ(response.ticker, "SPX");
+  EXPECT_EQ(response.ticker, "ES_SPX");
   EXPECT_DOUBLE_EQ(response.spot, 4800.5);
 
   ASSERT_EQ(response.levels.size(), 2u);
@@ -59,7 +59,7 @@ TEST(GexbotParser, FiltersPositiveGammaAndSorts) {
 }
 
 TEST(GexbotParser, ThrowsOnMissingMiniContracts) {
-  const char* broken_json = R"({"timestamp":1,"ticker":"SPX","spot":10.0})";
+  const char* broken_json = R"({"timestamp":1,"ticker":"ES_SPX","spot":10.0})";
   EXPECT_THROW(ParseGexbotGammaResponse(broken_json, 5), std::runtime_error);
 }
 

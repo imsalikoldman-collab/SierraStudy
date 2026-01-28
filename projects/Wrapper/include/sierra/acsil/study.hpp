@@ -13,5 +13,5 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc);
 /// @param sc Контекст Sierra Chart для текущего исследования.
 /// @return void.
 /// @note Реализация расположена в gexbot_gamma_levels.cpp, экспорт имя должно совпадать.
-/// @warning Требуется валидный API key и поддерживаемый тикер чарта (ES/MES → SPX, NQ/MNQ → NDX).
+/// @warning Требуется валидный API key и поддерживаемый тикер чарта (ES/MES → ES_SPX, NQ/MNQ → NQ_NDX).
 SCSFExport scsf_GexbotGammaLevels(SCStudyGraphRef sc);

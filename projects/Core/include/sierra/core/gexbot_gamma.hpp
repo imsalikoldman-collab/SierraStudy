@@ -19,7 +19,7 @@ struct GammaLevel {
 /**
  * @brief Нормализованный ответ Gexbot для gamma-профилей.
  * @param timestamp Unix-время (в секундах), когда данные были сгенерированы на стороне сервиса.
- * @param ticker Тикер в ответе (например, SPX/NDX).
+ * @param ticker Тикер в ответе (например, ES_SPX или NQ_NDX).
  * @param spot Спот/референсная цена базового актива.
  * @param levels Отфильтрованные уровни с положительной гаммой, отсортированные по убыванию specified_greek.
  */
@@ -33,8 +33,8 @@ struct GammaResponse {
 /**
  * @brief Конвертирует тикер графика Sierra Chart в тикер API Gexbot.
  * @param chart_symbol Символ графика (например, ESZ24, MNQH25).
- * @return Строка тикера Gexbot (SPX/NDX) или пустая строка, если символ не поддержан.
- * @note Маппинг: ES или MES → SPX; NQ или MNQ → NDX.
+ * @return Строка тикера Gexbot (ES_SPX/NQ_NDX) или пустая строка, если символ не поддержан.
+ * @note Маппинг (жёстко ограничен сервером): ES или MES → ES_SPX; NQ или MNQ → NQ_NDX.
  */
 std::string MapChartSymbolToGexbotTicker(const std::string& chart_symbol);
 

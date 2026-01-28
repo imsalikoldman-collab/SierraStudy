@@ -23,7 +23,7 @@ SierraStudy — шаблон репозитория для пользовате�
 
 ## Реализованные study
 - **SierraStudyMovingAverage** — пример обёртки SMA (ядро `moving_average` в Core).
-- **GexbotGammaLevels (State)** — HTTP-запрос к `api.gexbot.com/{ticker}/state/{gamma_*}` (только `gamma_zero|gamma_one`), фильтрация положительной гаммы, отрисовка уровней и подписи справа на графике. Поддерживаемые символы графика: ES/MES → SPX, NQ/MNQ → NDX. Требуется Input `API Key`. В левом нижнем углу отображается статус запросов: красный «нет запроса», жёлтый «нет ответа», зелёный «ОК».
+- **GexbotGammaLevels (State)** — HTTP-запрос к `api.gexbot.com/{ticker}/state/{gamma_*}` (только `gamma_zero|gamma_one`), фильтрация положительной гаммы, отрисовка уровней и подписи справа на графике. Поддерживаемые символы графика: ES/MES → `ES_SPX`, NQ/MNQ → `NQ_NDX` (других тикеров сервер не принимает). Требуется Input `API Key`. В левом нижнем углу отображается статус запросов: красный «нет запроса», жёлтый «нет ответа», зелёный «ОК». В режиме Debug в лог выводится собранный URL (ключ маскируется) и первые 50 символов ответа.
 
 ## Базовый цикл
 1. Сборка: `msbuild SierraStudy.sln /p:Configuration=Debug /p:Platform=x64`.
