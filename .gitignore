@@ -29,6 +29,11 @@ Debug/
 Release/
 Logs/
 **/build/
+# Оставляем общие props/targets в корне
+!build/
+!build/props/
+!build/props/Directory.Build.props
+!build/targets/
 
 # Binaries
 *.exe

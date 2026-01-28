@@ -21,6 +21,10 @@ SierraStudy — шаблон репозитория для пользовате�
 - `scripts/` — PowerShell-скрипты для сборки и горячей замены DLL.
 - `examples/` — примеры использования ядра и обёртки.
 
+## Реализованные study
+- **SierraStudyMovingAverage** — пример обёртки SMA (ядро `moving_average` в Core).
+- **GexbotGammaLevels (State)** — HTTP-запрос к `api.gexbot.com/{ticker}/state/{gamma_*}` (только `gamma_zero|gamma_one`), фильтрация положительной гаммы, отрисовка уровней и подписи справа на графике. Поддерживаемые символы графика: ES/MES → SPX, NQ/MNQ → NDX. Требуется Input `API Key`. В левом нижнем углу отображается статус запросов: красный «нет запроса», жёлтый «нет ответа», зелёный «ОК».
+
 ## Базовый цикл
 1. Сборка: `msbuild SierraStudy.sln /p:Configuration=Debug /p:Platform=x64`.
 2. Запуск тестов: `out\x64\Debug\SierraStudy.Tests.exe`.

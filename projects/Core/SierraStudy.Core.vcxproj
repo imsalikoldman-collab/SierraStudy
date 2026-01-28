@@ -56,9 +56,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\sierra\core\moving_average.hpp" />
+    <ClInclude Include="include\sierra\core\gexbot_gamma.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\moving_average.cpp" />
+    <ClCompile Include="src\gexbot_gamma.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

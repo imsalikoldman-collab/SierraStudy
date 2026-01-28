@@ -9,6 +9,8 @@
 - **Core** — *Static Library (.lib)*. Чистая бизнес-логика. **Без** `SierraChart.h` и любых ACSIL-типов.
 - **Wrapper** — *Dynamic Library (.dll)*. Обёртка ACSIL: читает входы/создаёт Subgraphs, вызывает Core, пишет результат в `sc.Subgraph`. Инициализирует логирование `plog` (если нужно).
 - **Tests** — *Console (exe)* на **Google Test**, линкуется **только** с `Core.lib`. Тесты актуализируем совместно с кодом.
+- **Новая study:** `scsf_GexbotGammaLevels` — запрос `gamma_zero/gamma_one` к Gexbot State API и отрисовка положительной гаммы справа на графике (см. external/*.md).
+- **Индикатор статуса:** красный «нет запроса», жёлтый «нет ответа», зелёный «ОК» в левом нижнем углу чарта, обновляется вместе с HTTP-FSM.
 
 **Принципы:**
 - Код в **Core** не зависит от **Wrapper**: никакого `SierraChart.h`, WinAPI и т.п.
@@ -141,7 +143,7 @@ inline void InitLogging() {
     { "label": "Hot-Swap", "type": "shell",
       "command": "pwsh",
       "args": ["-NoProfile","-File","${workspaceFolder}/scripts/HotSwap.ps1",
-        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Wrapper.dll",
+        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudy_GexBotLevel.dll",
         "-SierraDataDir","${env:SIERRA_DATA_DIR}"] }
   ],
   "inputs": [
@@ -175,7 +177,7 @@ $ErrorActionPreference='Stop'
 
 & msbuild.exe "$PSScriptRoot\..\SierraStudy.sln" /m /p:Configuration=$Configuration /p:Platform=x64
 & "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Tests.exe" --gtest_color=yes
-& pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy.Wrapper.dll" -SierraDataDir $env:SIERRA_DATA_DIR
+& pwsh -NoProfile -File "$PSScriptRoot\HotSwap.ps1" -Dll "$PSScriptRoot\..\out\x64\$Configuration\SierraStudy_GexBotLevel.dll" -SierraDataDir $env:SIERRA_DATA_DIR
 ```
 
 ---

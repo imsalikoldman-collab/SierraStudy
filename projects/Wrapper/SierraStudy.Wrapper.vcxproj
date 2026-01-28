@@ -39,7 +39,7 @@
   <PropertyGroup>
     <OutDir>$(SolutionDir)out\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>SierraStudy</TargetName>
+    <TargetName>SierraStudy_GexBotLevel</TargetName>
     <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -71,6 +71,7 @@
   <ItemGroup>
     <ClCompile Include="src\study.cpp" />
     <ClCompile Include="src\\supportFunction.cpp" />
+    <ClCompile Include="src\gexbot_gamma_levels.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Core\SierraStudy.Core.vcxproj">
