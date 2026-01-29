@@ -1,8 +1,8 @@
 #include "sierra/core/yaml_plan_loader.hpp"
 
 #include <c4/charconv.hpp>
-#include <ryml.hpp>
-#include <ryml_std.hpp>
+#include <ryml/ryml.hpp>
+#include <ryml/ryml_std.hpp>
 
 #include <fstream>
 #include <sstream>

@@ -9,6 +9,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="unit\test_main.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="unit\test_moving_average.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
@@ -20,12 +23,6 @@
     </ClCompile>
     <ClCompile Include="unit\test_yaml_plan_loader.cpp">
       <Filter>Tests</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)third_party\googletest\googletest\src\gtest-all.cc">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)third_party\googletest\googletest\src\gtest_main.cc">
-      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -21,7 +21,7 @@
 ### Основные модули
 - `moving_average.{hpp,cpp}` — O(n)-реализация скользящей средней с возвращением `NaN`, пока недостаточно данных.
 - `plan.hpp` — структуры `PriceRange`, `Zone`, `FlipZone`, `InstrumentPlan`, `StudyPlan`, `PlanLoadResult`.
-- `yaml_plan_loader.{hpp,cpp}` — загрузка YAML планов (формат v1.5-min-obj) с использованием RapidYAML.
+- `yaml_plan_loader.{hpp,cpp}` — загрузка YAML планов (формат v1.5-min-obj) с использованием RapidYAML (ryml).
 - `plan_formatter.{hpp,cpp}` — преобразование `StudyPlan` в строковую таблицу с локализацией даты/времени под America/New_York.
 
 ### Ограничения
@@ -62,7 +62,7 @@
 - `test_moving_average.cpp` — проверка NaN до накопления периода и выброса `std::invalid_argument` при `period == 0`.
 - `test_plan_formatter.cpp` — корректность форматирования таблицы (даты, времени, зон).
 - `test_yaml_plan_loader.cpp` — позитивный сценарий, отсутствие файла, ошибки структуры.
-- `test_yaml_parser.cpp` — smoke-тесты RapidYAML и вспомогательные проверки парсинга.
+- `test_yaml_parser.cpp` — smoke-тесты RapidYAML (ryml) и вспомогательные проверки парсинга.
 
 ### Правила
 - Тесты линкуются только с `Core.lib`.
@@ -110,10 +110,10 @@
 
 ## Внешние зависимости
 
-- **RapidYAML (ryml)** — парсинг YAML; подключён как git submodule в `third_party/rapidyaml`.
-- **c4core** — зависимость RapidYAML (подмодуль).
-- **Google Test** — исходники в `third_party/googletest`.
-- **plog** — header-only логгер в `third_party/plog`.
+- **RapidYAML (ryml)** — парсинг YAML; ставится через vcpkg (manifest).
+- **c4core** — зависимость RapidYAML (ставится транзитивно через vcpkg).
+- **Google Test** — через vcpkg.
+- **plog** — header-only логгер через vcpkg.
 
 Подмодули синхронизируются командой `git submodule update --init --recursive` (автоматически вызывается в `BuildAndSwap.ps1`).
 

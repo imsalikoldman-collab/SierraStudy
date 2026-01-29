@@ -1,9 +1,17 @@
 # Сторонние зависимости
 
-## RapidYAML (ryml)
-- Репозиторий: https://github.com/biojppm/rapidyaml
-- Зафиксированная версия: v0.5.0 (через git submodule)
-- Команда первоначальной инициализации: `git submodule update --init --recursive`
-- Команда для обновления до актуальной ревизии: `git submodule update --remote --merge --recursive`
+Все сторонние зависимости устанавливаются через vcpkg manifest (`vcpkg.json`):
+- `curl` (Schannel, http2)
+- `gtest`
+- `plog`
+- `ryml` (RapidYAML)
 
-> После `git pull` не забывайте выполнять `git submodule update --init --recursive`, чтобы подтянуть rapidyaml и вложенный c4core.
+Локальный `third_party/` больше не содержит исходников или подмодулей. Корневые переменные:
+- `VCPKG_ROOT=C:\dev\vcpkg`
+- `VCPKG_INSTALLED_DIR=C:\dev\vcpkg\installed-manifest`
+- `VCPKG_DEFAULT_TRIPLET=x64-windows-static`
+
+Пример установки зависимостей:
+```
+C:\dev\vcpkg\vcpkg.exe install --triplet x64-windows-static
+```

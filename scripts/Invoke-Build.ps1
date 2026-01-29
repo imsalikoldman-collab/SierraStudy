@@ -33,21 +33,12 @@ $repoRoot = Resolve-Path (Join-Path $scriptRoot '..')
 $resolveScript = Join-Path $scriptRoot 'Resolve-Msbuild.ps1'
 $msbuildPath = & $resolveScript -ThrowIfNotFound
 
-Push-Location $repoRoot
-try {
-  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
-  if ($gitCmd) {
-    Write-Host "[deps] git submodule update --init --recursive"
-    & $gitCmd.Source 'submodule' 'update' '--init' '--recursive'
-    if ($LASTEXITCODE -ne 0) {
-      throw "git submodule update failed with exit code $LASTEXITCODE."
-    }
-  } else {
-    Write-Warning "[deps] git executable not found, skipping submodule update."
-  }
-} finally {
-  Pop-Location
+$vcpkgRoot = $env:VCPKG_ROOT
+if (-not $vcpkgRoot -and (Test-Path 'C:\dev\vcpkg')) {
+  $vcpkgRoot = 'C:\dev\vcpkg'
 }
+$vcpkgTriplet = if ($env:VCPKG_DEFAULT_TRIPLET) { $env:VCPKG_DEFAULT_TRIPLET } else { 'x64-windows-static' }
+$vcpkgInstalledDir = if ($env:VCPKG_INSTALLED_DIR) { $env:VCPKG_INSTALLED_DIR } else { 'C:\dev\vcpkg\installed-manifest' }
 
 if (-not (Test-Path -LiteralPath $Solution)) {
   throw "Solution or project file not found: $Solution"
@@ -67,12 +58,17 @@ $msbuildArgs = @(
   '/m',
   "/p:Configuration=$Configuration",
   "/p:Platform=$Platform",
+  "/p:VcpkgRoot=$vcpkgRoot",
+  "/p:VcpkgTriplet=$vcpkgTriplet",
+  "/p:VcpkgEnableManifest=true",
+  "/p:VcpkgInstalledDir=$vcpkgInstalledDir",
   '/fileLogger',
   "/fileLoggerParameters:LogFile=$Log;Encoding=UTF-8"
 )
 
 Write-Host "[build] $Configuration|$Platform -> $Solution"
 Write-Host "[build] log: $Log"
+Write-Host "[vcpkg] root=$vcpkgRoot triplet=$vcpkgTriplet installed=$vcpkgInstalledDir"
 
 $result = & $msbuildPath @msbuildArgs
 if ($LASTEXITCODE -ne 0) {

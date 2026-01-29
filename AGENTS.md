@@ -44,9 +44,7 @@ SierraStudy/
 │  ├─ SierraACSILQuickTips.md  # практические советы по SCDateTime/UseTool
 │  └─ требования_к_спецификации_отображения.md
 │
-├─ third_party/
-│  ├─ googletest/              # submodule или вручную
-│  └─ plog/                    # header‑only логгер
+├─ third_party/                # пусто; зависимости ставятся через vcpkg
 │
 ├─ projects/
 │  ├─ Core/      (include/sierra/core/, src/, SierraStudy.Core.vcxproj)
@@ -65,6 +63,7 @@ SierraStudy/
 **Переменные окружения (на каждой машине):**
 - `SIERRA_SDK_DIR` → папка с заголовками ACSIL (обычно `.../SierraChart/ACS_Source`).
 - `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\2308\Data`).
+- `VCPKG_ROOT` → путь к установленному vcpkg (по умолчанию `C:\dev\vcpkg`). `VCPKG_DEFAULT_TRIPLET` — рекомендуем `x64-windows-static`.
 - Целевая рабочая версия Sierra Chart: **2308** (используется при тестировании и hot-swap).
 
 ---
@@ -74,7 +73,7 @@ SierraStudy/
 - **Visual Studio 2022 Build Tools** (MSVC v143, MSBuild).
 - **PowerShell 7** (`pwsh`) в PATH.
 - **Git** + доступ к GitHub.
-- *(опц.)* `vcpkg` — для быстрой установки GTest.
+- *(опц.)* `vcpkg` — для установки GTest, plog, RapidYAML, libcurl.
 
 ---
 
@@ -95,7 +94,7 @@ SierraStudy/
     <ClCompile>
       <AdditionalIncludeDirectories>
         $(SolutionDir)projects\Core\include;
-        $(SolutionDir)third_party\plog;
+        $(SolutionDir)projects\Wrapper\include;
         $(SIERRA_SDK_DIR)\ACS_Source;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
@@ -110,15 +109,13 @@ SierraStudy/
 
 ---
 
-## 5) Зависимости: Google Test и plog
+## 5) Зависимости через vcpkg (Google Test, plog, RapidYAML/ryml, libcurl)
 
 ### Google Test
-Подключение на выбор:
-- **Ручной**: исходники в `third_party/googletest`, проект *Tests* добавляет include‑путь `googletest/include` и собирает `gtest`/`gtest_main` (как часть solution или отдельными .lib).
-- **vcpkg**: `vcpkg install gtest` и добавить библиотеки к проекту *Tests*.
+- Подтягивается через vcpkg (manifest), дополнительных include/lib путей не требуется.
 
 ### plog
-Header‑only. Инициализируйте лог один раз (например, при `sc.Index == 0`) и пишите **в отдельный файл**:
+Header‑only (из vcpkg). Инициализируйте лог один раз (например, при `sc.Index == 0`) и пишите **в отдельный файл**:
 ```cpp
 #include <plog/Log.h>
 #include <plog/Initializers/RollingFileInitializer.h>
@@ -128,6 +125,13 @@ inline void InitLogging() {
 }
 ```
 > Лог включаем **только при необходимости** (минимум в горячих циклах). В отладке можно повышать уровень.
+
+### Зависимости через vcpkg manifest
+- `vcpkg.json` включает `curl[http2]`, `gtest`, `plog`, `ryml` (RapidYAML).
+- Убедитесь, что `VCPKG_ROOT` указывает на установленный vcpkg (`C:\dev\vcpkg`), а триплет `VCPKG_DEFAULT_TRIPLET` выставлен в `x64-windows-static` (соответствует /MT).
+- MSBuild получает настройки через `build/props/Directory.Build.props` и msbuild-интеграцию vcpkg; ручные include/lib пути не требуются.
+- Пример сборки Release:  
+  `msbuild SierraStudy.sln /m /p:Configuration=Release /p:Platform=x64 /p:VcpkgRoot=C:\dev\vcpkg /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir=C:\dev\vcpkg\installed-manifest /p:VcpkgEnableManifest=true`
 
 ---
 

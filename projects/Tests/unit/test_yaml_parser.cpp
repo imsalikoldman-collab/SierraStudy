@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include <ryml.hpp>
-#include <ryml_std.hpp>
+#include <ryml/ryml.hpp>
+#include <ryml/ryml_std.hpp>
 
 #include <stdexcept>
 

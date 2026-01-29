@@ -1,0 +1,13 @@
+{
+  "name": "sierra-study",
+  "version": "0.1.0",
+  "dependencies": [
+    {
+      "name": "curl",
+      "features": [ "http2" ]
+    },
+    "gtest",
+    "plog",
+    "ryml"
+  ]
+}

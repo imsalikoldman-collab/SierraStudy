@@ -28,7 +28,12 @@ x64/
 Debug/
 Release/
 Logs/
+build/logs/
 **/build/
+!/build/
+!/build/props/
+!/build/props/Directory.Build.props
+!/build/targets/
 
 # Binaries
 *.exe
@@ -59,3 +64,6 @@ Logs/
 /third_party/**/cmake-build*/
 /third_party/**/Debug/
 /third_party/**/Release/
+
+# vcpkg per-repo installed tree
+/vcpkg_installed/

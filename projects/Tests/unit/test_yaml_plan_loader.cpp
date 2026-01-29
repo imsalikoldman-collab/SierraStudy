@@ -4,13 +4,35 @@
 
 #include <filesystem>
 
+namespace {
+
+std::filesystem::path FindTestFile(const std::string& filename) {
+  std::vector<std::filesystem::path> candidates;
+  candidates.emplace_back(std::filesystem::current_path() / "test_files" / filename);
+
+  // __FILE__ -> .../projects/Tests/unit/test_yaml_plan_loader.cpp
+  const auto repo_root =
+      std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path();
+  candidates.emplace_back(repo_root / "test_files" / filename);
+
+  for (const auto& path : candidates) {
+    if (std::filesystem::exists(path)) {
+      return path;
+    }
+  }
+  // fallback: first candidate (to preserve original error message location)
+  return candidates.front();
+}
+
+}  // namespace
+
 /**
  * @brief Проверяет корректную загрузку реального YAML-плана.
  * @note Использует файл из test_files для интеграционного сценария.
  * @warning Пути рассчитываются относительно рабочего каталога тестов.
  */
 TEST(YamlPlanLoaderTest, LoadsValidPlan) {
-  const auto path = std::filesystem::current_path() / "test_files" / "nq_intraday_flip_example.yaml";
+  const auto path = FindTestFile("nq_intraday_flip_example.yaml");
   const auto result = sierra::core::LoadStudyPlanFromFile(path);
   ASSERT_TRUE(result.success()) << result.error_message;
 

@@ -2,6 +2,15 @@ $ErrorActionPreference = 'Stop'
 if (-not $env:SIERRA_DATA_DIR) {
     $env:SIERRA_DATA_DIR = 'C:\2308\Data'
 }
+if (-not $env:VCPKG_ROOT -and (Test-Path 'C:\dev\vcpkg')) {
+    $env:VCPKG_ROOT = 'C:\dev\vcpkg'
+}
+if (-not $env:VCPKG_DEFAULT_TRIPLET) {
+    $env:VCPKG_DEFAULT_TRIPLET = 'x64-windows-static'
+}
+if (-not $env:VCPKG_INSTALLED_DIR) {
+    $env:VCPKG_INSTALLED_DIR = 'C:\dev\vcpkg\installed-manifest'
+}
 
 function Copy-TestFiles {
     param(
@@ -32,7 +41,15 @@ function Copy-TestFiles {
 }
 
 try {
-    & "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" "$PSScriptRoot\SierraStudy.sln" /m /p:Configuration=Debug /p:Platform=x64
+    & "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
+      "$PSScriptRoot\SierraStudy.sln" `
+      /m `
+      /p:Configuration=Debug `
+      /p:Platform=x64 `
+      /p:VcpkgRoot=$env:VCPKG_ROOT `
+      /p:VcpkgTriplet=$env:VCPKG_DEFAULT_TRIPLET `
+      /p:VcpkgEnableManifest=true `
+      /p:VcpkgInstalledDir=$env:VCPKG_INSTALLED_DIR
     Write-Host "[build] ok"
 } catch {
     Write-Host "[build] fail: $($_.Exception.Message)"

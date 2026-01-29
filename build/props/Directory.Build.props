@@ -1,0 +1,38 @@
+<Project>
+  <PropertyGroup>
+    <Platform>x64</Platform>
+    <PlatformToolset>v143</PlatformToolset>
+    <LanguageStandard>stdcpp17</LanguageStandard>
+    <CharacterSet>Unicode</CharacterSet>
+    <WarningLevel>Level4</WarningLevel>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- vcpkg manifest settings -->
+    <VcpkgRoot Condition="'$(VCPKG_ROOT)'!=''">$(VCPKG_ROOT)</VcpkgRoot>
+    <VcpkgRoot Condition="'$(VcpkgRoot)'==''">C:\dev\vcpkg</VcpkgRoot>
+    <VcpkgTriplet Condition="'$(VCPKG_DEFAULT_TRIPLET)'!=''">$(VCPKG_DEFAULT_TRIPLET)</VcpkgTriplet>
+    <VcpkgTriplet Condition="'$(VcpkgTriplet)'==''">x64-windows-static</VcpkgTriplet>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level4</WarningLevel>
+      <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>
+        $(SolutionDir)projects\Core\include;
+        $(SolutionDir)projects\Wrapper\include;
+        $(SIERRA_SDK_DIR)\ACS_Source;
+        %(AdditionalIncludeDirectories)
+      </AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>
+        NOMINMAX;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.props"
+          Condition="Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.props') and '$(VcpkgPropsImported)'!='true'" />
+</Project>
