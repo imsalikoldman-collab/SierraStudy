@@ -118,6 +118,22 @@
 
 Управление зависимостями выполняется через manifest `vcpkg.json`; подмодули Git не используются.
 
+### Режим работы vcpkg
+- В репозитории принят **manifest‑режим**: зависимости описаны в `vcpkg.json`, триплет по умолчанию `x64-windows-static`, локальный кэш пакетов лежит в `vcpkg_installed/` (под git‑ignore).
+- MSBuild получает настройки через `build/props/Directory.Build.props` (импорт `vcpkg.props`, `VcpkgEnableManifest=true`, `VcpkgRoot` по умолчанию `C:\dev\vcpkg`).
+- Классический режим (global install) не используется в проекте; единственная команда локально — `vcpkg.exe install --triplet x64-windows-static`, которая читает текущий manifest.
+
+### Сборка
+- Инструмент: `MSBuild` (VS 2022, toolset v143), общие параметры заданы в `build/props/Directory.Build.props` (`stdcpp17`, `/W4`, статический CRT для Release/Debug, include Core/Wrapper + `SIERRA_SDK_DIR`, импорт vcpkg manifest).
+- Конфигурации: `Debug` и `Release`, платформа `x64`.
+- Вывод артефактов: `out/x64/<Config>/` — `SierraStudy.dll` (Wrapper), `SierraStudy.Core.lib` (Core), `SierraStudy.Tests.exe` (Tests).
+- Запуск задач из VS Code: `.vscode/tasks.json` (`Build`, `Test`, `Hot-Swap`) — передают msbuild путь и триплет через переменные окружения, используют manifest vcpkg.
+- Ручные команды:
+  - Сборка Debug: `msbuild SierraStudy.sln /m /p:Configuration=Debug /p:Platform=x64`
+  - Сборка Release: `msbuild SierraStudy.sln /m /p:Configuration=Release /p:Platform=x64 /p:VcpkgRoot=C:\dev\vcpkg /p:VcpkgTriplet=x64-windows-static /p:VcpkgInstalledDir=C:\dev\vcpkg\installed-manifest /p:VcpkgEnableManifest=true`
+- Тесты: `out\x64\<Config>\SierraStudy.Tests.exe` (линкуется только с `Core.lib`, зависимости подтягивает vcpkg).
+- Кратко о «виде сборки»: MSBuild + manifest vcpkg, C++17, /W4, статический CRT, x64, конфигурации Debug/Release, артефакты в `out/x64/<Config>/`.
+
 ## Конфигурация среды
 
 - `SIERRA_SDK_DIR` — путь к установленному Sierra Chart (`...\ACS_Source`).
