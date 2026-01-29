@@ -110,12 +110,13 @@
 
 ## Внешние зависимости
 
+- **libcurl** — сетевые вызовы (HTTPS); ставится через vcpkg в статически линкованном варианте (`x64-windows-static`, Schannel, http2).
 - **RapidYAML (ryml)** — парсинг YAML; ставится через vcpkg (manifest).
-- **c4core** — зависимость RapidYAML (ставится транзитивно через vcpkg).
-- **Google Test** — через vcpkg.
+- **c4core** — зависимость RapidYAML (транзитивно через vcpkg).
+- **Google Test** — через vcpkg; используется только в проекте Tests.
 - **plog** — header-only логгер через vcpkg.
 
-Подмодули синхронизируются командой `git submodule update --init --recursive` (автоматически вызывается в `BuildAndSwap.ps1`).
+Управление зависимостями выполняется через manifest `vcpkg.json`; подмодули Git не используются.
 
 ## Конфигурация среды
 

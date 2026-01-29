@@ -25,10 +25,10 @@ SierraStudy — каркас для разработки и горячей за�
 3. При `sc.LastCallToFunction` рисунки удаляются, persistent-память очищается (`ReleasePlanState`), обеспечивая чистый повторный запуск DLL.
 
 ## Инструменты и автоматизация
-- **MSBuild**: общие настройки сохранены в `build/props/Directory.Build.props` (toolset v143, `stdcpp17`, include-пути до Core, plog, RapidYAML, использование `SIERRA_SDK_DIR`).
+- **MSBuild**: общие настройки сохранены в `build/props/Directory.Build.props` (toolset v143, `stdcpp17`, include-пути до Core/Wrapper и `SIERRA_SDK_DIR`, подключение vcpkg manifest).
 - **VS Code**: `.vscode/tasks.json` предоставляет задачи Build/Test/Hot-Swap.
 - **PowerShell 7**:
-  - `scripts/BuildAndSwap.ps1` выполняет `git submodule update`, сборку конфигураций, запуск тестов и горячую замену DLL;
+  - `scripts/BuildAndSwap.ps1` выполняет сборку конфигураций, запуск тестов и горячую замену DLL (зависимости берёт из vcpkg manifest);
   - `scripts/HotSwap.ps1` копирует DLL в `SIERRA_DATA_DIR`, при необходимости отправляя Sierra Chart UDP-команды RELEASE/ALLOW;
   - `scripts/Invoke-Build.ps1`, `scripts/Invoke-Tests.ps1`, `go.ps1` ускоряют цикл Debug → Test → Deploy.
 - **Зависимости**: GoogleTest, plog, RapidYAML (ryml) и libcurl ставятся через vcpkg manifest (`vcpkg.json`, фича http2, schannel по умолчанию). Обязательные переменные среды: `SIERRA_SDK_DIR` (путь к `ACS_Source`), `SIERRA_DATA_DIR` (каталог `Data`), `VCPKG_ROOT` (по умолчанию `C:\dev\vcpkg`), при необходимости `VCPKG_DEFAULT_TRIPLET` (`x64-windows-static`).
