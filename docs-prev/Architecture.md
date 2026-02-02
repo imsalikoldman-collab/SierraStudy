@@ -35,21 +35,17 @@
 - `src/*.cpp` — реализация ACSIL-адаптера и вспомогательных функций.
 
 ### Ключевые элементы
-- `study.cpp` — SCSFExport `scsf_SierraStudyMovingAverage` (историческое имя) реализует опрос GexBot API:
-  - маппинг символа графика: ES/MES→`ES_SPX`, NQ/MNQ→`NQ_NDX`;
-  - Inputs: `GexBot API Key` (дефолт IZiEb6yDrgxE), `Greek` из списка `delta_zero, gamma_zero, delta_one, gamma_one, charm_zero, vanna_zero, charm_one, vanna_one` (дефолт **gamma_zero**), `Poll Interval (seconds)` (10–100, дефолт 30);
-  - HTTP GET `https://api.gexbot.com/{TICKER}/state/{GREEK}?key=...` через libcurl; парсинг JSON-ответа RapidYAML (как YAML-подмножество);
-  - вывод результата на график через `UseTool` с `DRAWING_STATIONARY_TEXT`; ошибки пишутся в Message Log.
-- `supportFunction.cpp` (поддерживающий, не вызывается текущим study):
+- `study.cpp` — пустой entry-point (SCSFExport) без вычислительной логики; служит шаблоном для будущих исследований.
+- `supportFunction.cpp`:
   - `LogDllStartup`, `EnsureLogging` — интеграция с plog и Sierra Chart Message Log;
   - `ConvertIso8601ToSCDateTime` — преобразование ISO-8601 времени в `SCDateTime` с учётом DST;
   - `RenderStandaloneDebugLine` — вспомогательная линия для отладки;
-  - `RenderInstrumentPlanGraphics` — построение зон, подписей SL/TP/Flip и маркеров `generated_at`.
+  - `RenderInstrumentPlanGraphics` — построение зон, подписей SL/TP/Flip и маркеров `generated_at` (сейчас не вызывается).
 
 ### Особенности взаимодействия
-- Persistent-данные: `kPersistState` хранит `GexState` (последний опрос, интервал, текст); освобождается при `sc.LastCallToFunction`.
-- Логирование: ошибки API отправляются в Sierra Chart Message Log; plog остаётся доступным в поддерживающих функциях, но study его не включает.
-- Рендер: `DRAWING_STATIONARY_TEXT` с обновлением по `LineNumber`, скрытый Subgraph[0]; `UpdateAlways=1` для своевременной перерисовки текста.
+- Persistent-данные хранятся через `sc.Get/SetPersistent*` (индексы `kPersistLogging`, `kPersistPlanState`, `kPersistDebugLine`).
+- Логирование условно: в наличии plog (`third_party/plog`) создаётся `Logs/SierraStudy.log`, иначе используются только сообщения Sierra Chart.
+- Отрисовка зон использует `UseTool` с регистрацией линий/прямоугольников, сохранением `LineNumber` в `PlanWatcherState` и их очисткой при обновлении/выходе.
 
 ## Tests
 
@@ -69,14 +65,10 @@
 
 ## Поток выполнения на графике
 
-1. **SetDefaults** (`study.cpp`): задаёт имя/описание, включает AutoLoop, скрывает Subgraph[0], создаёт Inputs (API ключ, Greek, интервал).
-2. **Основной цикл**:
-   - нормализует интервал (10–100 сек);
-   - маппит символ в тикер; при неизвестном символе выводит «Waiting…»;
-   - по таймеру выполняет запрос к GexBot, парсит JSON, сохраняет текст в persistent-состояние;
-   - ошибки логируются, последний удачный текст показывается.
-3. **Отрисовка**: `RenderStatusText` рисует многострочный текст через `UseTool` (stationary text, левая верхняя часть графика).
-4. **LastCallToFunction**: очищает persistent-структуру.
+1. **SetDefaults** (`study.cpp`):
+   - задаёт имя/описание, включает AutoLoop, скрывает Subgraph[0] как заглушку.
+2. **Основной цикл**: пустой — не выполняет расчётов, не рендерит графику.
+3. **LastCallToFunction**: пустой — дополнительных действий не требуется.
 
 ## Автоматизация
 
@@ -104,12 +96,6 @@
 - **c4core** — зависимость RapidYAML (транзитивно через vcpkg).
 - **Google Test** — через vcpkg; используется только в проекте Tests.
 - **plog** — header-only логгер через vcpkg.
-- **GexBot API** — формат ответа задокументирован в `docs/GexBotResponseFormat.md`.
-
-### Runtime‑состояние (GexState в study.cpp)
-- `last_poll_time`, `poll_interval`, `last_text` — сервисные поля таймера и последнего отображённого текста.
-- `key_levels` (`major_positive/negative/long_gamma/short_gamma`) — распарсенные ключевые уровни из ответа.
-- `mini_contracts` — вектор `{strike, specified_greek}`, заполняется всеми элементами `mini_contracts` ответа и сортируется по `strike` для последующей фильтрации/рендера.
 
 Управление зависимостями выполняется через manifest `vcpkg.json`; подмодули Git не используются.
 
@@ -120,7 +106,7 @@
 
 ### Сборка
 - Инструмент: `MSBuild` (VS 2022, toolset v143), общие параметры заданы в `build/props/Directory.Build.props` (`stdcpp17`, `/W4`, статический CRT для Release/Debug, include Core/Wrapper + `SIERRA_SDK_DIR`, импорт vcpkg manifest).
-- Предупреждения из Sierra SDK отключены через `ExternalIncludeDirectories`, `ExternalWarningLevel=TurnOffAllWarnings` (=> `/external:W0`) и `ExternalDiagnostics=false`; для собственного кода сохраняется `/W4`.
+- Предупреждения из Sierra SDK отключены через `ExternalIncludeDirectories`, `ExternalWarningLevel=Level0` и `ExternalDiagnostics=false`; для собственного кода сохраняется `/W4`.
 - Конфигурации: `Debug` и `Release`, платформа `x64`.
 - Вывод артефактов: `out/x64/<Config>/` — `SierraStudy_GexBot.dll` (Wrapper), `SierraStudy.Core.lib` (Core), `SierraStudy.Tests.exe` (Tests).
 - Запуск задач из VS Code: `.vscode/tasks.json` (`Build`, `Test`, `Hot-Swap`) — передают msbuild путь и триплет через переменные окружения, используют manifest vcpkg.

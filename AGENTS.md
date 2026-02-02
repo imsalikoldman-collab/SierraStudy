@@ -153,7 +153,7 @@ inline void InitLogging() {
     { "label": "Hot-Swap", "type": "shell",
       "command": "pwsh",
       "args": ["-NoProfile","-File","${workspaceFolder}/scripts/HotSwap.ps1",
-        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.Wrapper.dll",
+        "-Dll","${workspaceFolder}/out/x64/${input:cfg}/SierraStudy_GexBot.dll",
         "-SierraDataDir","${env:SIERRA_DATA_DIR}"] }
   ],
   "inputs": [
@@ -197,7 +197,7 @@ Copy-TestFilesToSierra -RepoRoot $repoRoot -SierraDataDir $SierraDataDir
 ```powershell
 Copy-TestFiles -RepoRoot $PSScriptRoot -DestinationRoot $env:SIERRA_DATA_DIR
 pwsh -NoProfile -File "$PSScriptRoot\scripts\HotSwap.ps1" `
-  -Dll "$PSScriptRoot\out\x64\Debug\SierraStudy.dll" `
+  -Dll "$PSScriptRoot\out\x64\Debug\SierraStudy_GexBot.dll" `
   -SierraDataDir $env:SIERRA_DATA_DIR -AutoRemoteFallback
 ```
 > Корневой `go.ps1` также копирует `test_files` в `$SIERRA_DATA_DIR\test_files` и валидирует результат.

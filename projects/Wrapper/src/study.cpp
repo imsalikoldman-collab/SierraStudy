@@ -1,630 +1,461 @@
 #include "sierra/acsil/study.hpp"
-#include "sierra/acsil/supportFunction.hpp"
 
-#include "sierra/core/moving_average.hpp"
-#include "sierra/core/plan.hpp"
-#include "sierra/core/plan_formatter.hpp"
-#include "sierra/core/yaml_plan_loader.hpp"
+#include <curl/curl.h>
+#include <ryml/ryml.hpp>
+#include <ryml/ryml_std.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
-#include <cmath>
-#include <filesystem>
 #include <limits>
-#include <memory>
 #include <sstream>
 #include <string>
+#include <iomanip>
 #include <vector>
-
-#if __has_include(<plog/Log.h>)
-#define SIERRA_STUDY_HAS_PLOG 1
-#include <plog/Initializers/RollingFileInitializer.h>
-#include <plog/Log.h>
-#else
-#define SIERRA_STUDY_HAS_PLOG 0
-#endif
 
 /// \brief Пользовательские исследования Sierra Chart <Add Custom Study>.
 SCDLLName("SierraStudy Custom Studies")
 
 namespace {
 
-constexpr int kPersistLogging = 1;
-constexpr int kPersistPlanState = 2;
-constexpr int kPersistDebugLine = 3;
-constexpr double kDefaultPlanCheckIntervalSeconds = 15.0;
-constexpr double kMinPlanCheckIntervalSeconds = 1.0;
+constexpr int kPersistState = 1;
 constexpr double kSecondsPerDay = 24.0 * 60.0 * 60.0;
-constexpr std::array<SubgraphLineStyles, 5> kLineStyleOptions = {
-    LINESTYLE_SOLID, LINESTYLE_DASH, LINESTYLE_DOT, LINESTYLE_DASHDOT, LINESTYLE_DASHDOTDOT};
+constexpr double kDefaultPollInterval = 30.0;
+constexpr double kMinPollInterval = 10.0;
+constexpr double kMaxPollInterval = 100.0;
 
 /**
- * @brief Хранит кеш плана и состояние слежения за YAML-файлом.
- * @note Используется через persistent-указатель Sierra Chart.
- * @warning Объект живёт до выгрузки study, освобождать через ReleasePlanState.
+ * @brief Сохраняет данные опроса GexBot в persistent-памяти.
+ * @note Данные живут между вызовами study до выгрузки DLL.
+ * @warning Удаляется при sc.LastCallToFunction.
  */
-struct PlanWatcherState {
-  std::filesystem::file_time_type last_write{};
-  bool has_last_write = false;
-  bool file_available = false;
-  bool status_known = false;
-  bool directory_reported_empty = false;
-  bool file_name_reported_empty = false;
-  double last_check_timestamp = 0.0;
-  double last_interval_seconds = kDefaultPlanCheckIntervalSeconds;
-  std::string last_directory_key;
-  std::string last_file_name_key;
-  std::shared_ptr<sierra::core::StudyPlan> plan;
-  std::string rendered_text;
-  bool dirty = false;
-  int table_line_number = 0;
-  std::vector<int> plan_drawing_line_numbers;
-  bool graphics_dirty = false;
-  SCDateTime plan_start_time{};
+struct GexState {
+  double last_poll_time = 0.0;
+  double poll_interval = kDefaultPollInterval;
+  std::string last_text;
+  // Структурированные данные для последующего отображения/сортировки.
+  struct KeyLevels {
+    double major_positive = std::numeric_limits<double>::quiet_NaN();
+    double major_negative = std::numeric_limits<double>::quiet_NaN();
+    double major_long_gamma = std::numeric_limits<double>::quiet_NaN();
+    double major_short_gamma = std::numeric_limits<double>::quiet_NaN();
+  } key_levels;
+  struct MiniContract {
+    double strike = std::numeric_limits<double>::quiet_NaN();
+    double specified_greek = std::numeric_limits<double>::quiet_NaN();
+  };
+  std::vector<MiniContract> mini_contracts;
 };
 
-#if SIERRA_STUDY_HAS_PLOG
-/// @brief Инициализирует plog при первом запуске study.
-/// @param sc Контекст Sierra Chart, предоставляющий persistent-хранилище.
-/// @return void.
-/// @note Создаёт каталог Logs и включает кольцевой лог-файл SierraStudy.log.
-/// @warning При исключении выставляет persistant-флаг -1, чтобы избежать повторов.
-void EnsureLogging(SCStudyGraphRef sc) {
-  if (sc.Index != 0) {
-    return;
-  }
-
-  const int initialized = sc.GetPersistentInt(kPersistLogging);
-  if (initialized == 1 || initialized == -1) {
-    return;
-  }
-
-  try {
-    std::filesystem::create_directories("Logs");
-    plog::init(plog::info, "Logs/SierraStudy.log", 5 * 1024 * 1024, 3);
-    sc.SetPersistentInt(kPersistLogging, 1);
-    PLOG_INFO << "SierraStudy logging initialized";
-  } catch (...) {
-    sc.SetPersistentInt(kPersistLogging, -1);
-  }
-}
-#else
-void EnsureLogging(SCStudyGraphRef) {}
-#endif
-
 /**
- * @brief Пишет информационное сообщение в лог Sierra Chart и plog.
- * @param sc Контекст study для обращения к AddMessageToLog.
- * @param message Текст сообщения.
- * @return void.
- * @note Используется для отчётов о нормальном выполнении операций.
- * @warning Сообщение отображается в Message Log; избегайте частых повторов.
+ * @brief Обработчик записи для libcurl (складывает ответ в std::string).
+ * @param ptr Буфер libcurl.
+ * @param size Размер элемента.
+ * @param nmemb Количество элементов.
+ * @param userdata Указатель на std::string для накопления.
+ * @return Количество записанных байт.
+ * @note Возвращение меньшего числа приведёт к ошибке curl.
+ * @warning Userdata должен указывать на валидную std::string.
  */
-void LogInfo(SCStudyGraphRef sc, const std::string& message) {
-  sc.AddMessageToLog(message.c_str(), 0);
-#if SIERRA_STUDY_HAS_PLOG
-  PLOG_INFO << message;
-#endif
+size_t CurlWriteCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
+  auto* buffer = static_cast<std::string*>(userdata);
+  const size_t total = size * nmemb;
+  buffer->append(ptr, total);
+  return total;
 }
 
 /**
- * @brief Пишет сообщение об ошибке в лог Sierra Chart и plog.
- * @param sc Контекст study для вывода.
- * @param message Текст ошибки.
- * @return void.
- * @note Уровень ошибки в Sierra Chart помечается флагом 1.
- * @warning Не забывайте понятные формулировки для трейдера.
+ * @brief Приводит строку к верхнему регистру ASCII.
+ * @param value Исходная строка.
+ * @return Строка в верхнем регистре.
+ * @note Используется для нормализации символа графика.
+ * @warning Работает корректно только с ASCII-символами.
  */
-void LogError(SCStudyGraphRef sc, const std::string& message) {
-  sc.AddMessageToLog(message.c_str(), 1);
-#if SIERRA_STUDY_HAS_PLOG
-  PLOG_ERROR << message;
-#endif
-}
-
-/**
- * @brief Возвращает persistent-состояние наблюдателя, создавая при необходимости.
- * @param sc Контекст study.
- * @return PlanWatcherState* Указатель на состояние.
- * @note Вызывается перед обращением к наблюдателю; память освобождается ReleasePlanState.
- * @warning Не храните возвращённый указатель вне функции между вызовами без проверки.
- */
-std::string ToUpperASCII(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::toupper(ch));
-  });
+std::string ToUpperAscii(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
   return value;
 }
 
-std::string NormalizeDirectoryKey(const std::filesystem::path& directory) {
-  if (directory.empty()) {
+/**
+ * @brief Маппинг символа графика в тикер GexBot.
+ * @param symbol Символ из `sc.Symbol`.
+ * @return Тикер GexBot или пустая строка, если символ не поддержан.
+ * @note Поддерживаются ES/MES → SPX_ES и NQ/MNQ → NQ_NDX.
+ * @warning Для прочих символов возвращается пустая строка — опрос не выполняется.
+ */
+std::string MapSymbolToTicker(const SCString& symbol) {
+  const std::string upper = ToUpperAscii(symbol.GetChars());
+  if (upper.find("MES") != std::string::npos || upper.find(" ES") != std::string::npos ||
+      upper.rfind("ES", 0) == 0) {
+    return "ES_SPX";
+  }
+  if (upper.find("MNQ") != std::string::npos || upper.find(" NQ") != std::string::npos ||
+      upper.rfind("NQ", 0) == 0) {
+    return "NQ_NDX";
+  }
+  return {};
+}
+
+/**
+ * @brief Возвращает разницу времени в секундах между now и last.
+ * @param now Текущее время (SCDateTime как double).
+ * @param last Предыдущее время (SCDateTime как double).
+ * @return Интервал в секундах; бесконечность, если last == 0.
+ * @note Переводит дни Sierra Chart в секунды.
+ * @warning При неверных данных может вернуть NaN или inf.
+ */
+double SecondsSince(double now, double last) {
+  if (last == 0.0) return std::numeric_limits<double>::infinity();
+  return (now - last) * kSecondsPerDay;
+}
+
+/**
+ * @brief Безопасно преобразует строку в double, возвращает NaN при ошибке.
+ * @param text Строка с числом.
+ * @return double значение или NaN.
+ */
+double SafeToDouble(const std::string& text) {
+  try {
+    size_t idx = 0;
+    const double v = std::stod(text, &idx);
+    if (idx == text.size()) return v;
+  } catch (...) {
+  }
+  return std::numeric_limits<double>::quiet_NaN();
+}
+
+std::string FormatDouble(double v, int precision = 4) {
+  if (std::isnan(v)) return "NaN";
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(precision) << v;
+  return oss.str();
+}
+
+double ExtractDouble(const std::string& body, const char* key) {
+  const char* pos = std::strstr(body.c_str(), key);
+  if (!pos) return std::numeric_limits<double>::quiet_NaN();
+  pos = std::strchr(pos, ':');
+  if (!pos) return std::numeric_limits<double>::quiet_NaN();
+  // move past ':' and whitespace
+  ++pos;
+  while (*pos == ' ' || *pos == '\t') ++pos;
+  try {
+    return std::stod(pos);
+  } catch (...) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+}
+
+std::vector<GexState::MiniContract> ParseMiniContracts(const std::string& body) {
+  std::vector<GexState::MiniContract> result;
+  const std::string key = "\"mini_contracts\"";
+  size_t start = body.find(key);
+  if (start == std::string::npos) return result;
+  start = body.find('[', start);
+  if (start == std::string::npos) return result;
+  int depth = 0;
+  for (size_t i = start; i < body.size(); ++i) {
+    char c = body[i];
+    if (c == '[') depth++;
+    else if (c == ']') depth--;
+    if (depth == 0 && i > start) { // end of outer array
+      break;
+    }
+    // detect inner array start
+    if (depth == 2 && body[i] == '[') {
+      // parse inner array elements
+      size_t j = i + 1;
+      auto read_number = [&](size_t& idx) -> double {
+        while (idx < body.size() && (body[idx] == ' ' || body[idx] == '\t')) ++idx;
+        size_t end = idx;
+        while (end < body.size() && (std::isdigit(static_cast<unsigned char>(body[end])) ||
+                                     body[end] == '.' || body[end] == '-' || body[end] == '+' ||
+                                     body[end] == 'e' || body[end] == 'E')) {
+          ++end;
+        }
+        if (end == idx) return std::numeric_limits<double>::quiet_NaN();
+        double v = std::numeric_limits<double>::quiet_NaN();
+        try { v = std::stod(body.substr(idx, end - idx)); } catch (...) {}
+        idx = end;
+        return v;
+      };
+      GexState::MiniContract mc;
+      // element0: strike
+      mc.strike = read_number(j);
+      // skip element1, element2
+      for (int skip = 0; skip < 2; ++skip) {
+        j = body.find_first_of(",]", j);
+        if (j == std::string::npos) break;
+        ++j;
+      }
+      // element3: specified_greek
+      mc.specified_greek = read_number(j);
+      result.push_back(mc);
+    }
+  }
+  std::sort(result.begin(), result.end(),
+            [](const GexState::MiniContract& a, const GexState::MiniContract& b) { return a.strike < b.strike; });
+  return result;
+}
+
+// Формирует таблицу мини-контрактов в колонках по 25 строк, сортировка по убыванию strike.
+std::string FormatMiniContractsColumns(const std::vector<GexState::MiniContract>& data) {
+  if (data.empty()) return std::string("  (empty)");
+  constexpr size_t kRows = 25;
+  const size_t cols = (data.size() + kRows - 1) / kRows;
+
+  std::vector<GexState::MiniContract> desc = data;
+  std::sort(desc.begin(), desc.end(),
+            [](const GexState::MiniContract& a, const GexState::MiniContract& b) { return a.strike > b.strike; });
+
+  std::ostringstream out;
+  for (size_t row = 0; row < kRows; ++row) {
+    bool any = false;
+    for (size_t col = 0; col < cols; ++col) {
+      const size_t idx = row + col * kRows;
+      if (idx >= desc.size()) continue;
+      const auto& mc = desc[idx];
+      out << std::setw(3) << (idx + 1) << " strike=" << std::setw(8) << FormatDouble(mc.strike, 2)
+          << " greek=" << std::setw(8) << FormatDouble(mc.specified_greek, 2) << "   ";
+      any = true;
+    }
+    if (any) out << "\n";
+  }
+  return out.str();
+}
+
+/**
+ * @brief Выполняет HTTP GET к API GexBot и возвращает готовый текст.
+ * @param ticker Тикер GexBot.
+ * @param greek Имя грека (delta/gamma/vega/theta/rho).
+ * @param api_key Ключ API.
+ * @param error_out Сюда пишется текст ошибки при неудаче.
+ * @param state_out Заполняет структурированные данные (ключевые уровни, mini_contracts).
+ * @return Многострочный текст результата или пустая строка при ошибке.
+ * @note Парсинг JSON выполняется через RapidYAML (JSON-подмножество YAML).
+ * @warning Требуется сетевое подключение и валидный ключ.
+ */
+std::string FetchGexbotState(const std::string& ticker,
+                             const std::string& greek,
+                             const std::string& api_key,
+                             std::string& error_out,
+                             GexState& state_out) {
+  error_out.clear();
+  if (ticker.empty()) {
+    error_out = "Ticker mapping failed";
+    return {};
+  }
+  if (api_key.empty()) {
+    error_out = "API key is empty";
+    return {};
+  }
+  CURL* curl = curl_easy_init();
+  if (curl == nullptr) {
+    error_out = "curl init failed";
     return {};
   }
 
-  std::filesystem::path normalized = directory;
+  std::string response;
+  std::ostringstream url;
+  url << "https://api.gexbot.com/" << ticker << "/state/" << greek << "?key=" << api_key;
+  const std::string request_url = url.str();
+
+  curl_easy_setopt(curl, CURLOPT_URL, request_url.c_str());
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "SierraStudy/1.0");
+
+  const CURLcode rc = curl_easy_perform(curl);
+  long http_code = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+  curl_easy_cleanup(curl);
+
+  if (rc != CURLE_OK) {
+    error_out = std::string("curl error: ") + curl_easy_strerror(rc);
+    return {};
+  }
+  if (http_code >= 400) {
+    std::ostringstream oss;
+    oss << "Request: " << request_url << "\nHTTP " << http_code << " from GexBot";
+    if (!response.empty()) {
+      const std::string body_preview = response.substr(0, 512);
+      oss << "; body: " << body_preview;
+      if (response.size() > body_preview.size()) {
+        oss << " ...";
+      }
+    }
+    error_out = oss.str();
+    return {};
+  }
+
+  // Парсинг JSON как YAML-подмножества.
   try {
-    normalized = normalized.lexically_normal();
+    // Очистить старые структурированные данные.
+    state_out.key_levels = {};
+    state_out.mini_contracts.clear();
+
+    std::ostringstream out;
+
+    out << "Request: " << request_url;
+    out << "\nTicker: " << ticker << "\nGreek: " << greek;
+
+    // Key levels (short and clear)
+    out << "\n\nKey Levels:";
+    state_out.key_levels.major_positive = ExtractDouble(response, "\"major_positive\"");
+    state_out.key_levels.major_negative = ExtractDouble(response, "\"major_negative\"");
+    state_out.key_levels.major_long_gamma = ExtractDouble(response, "\"major_long_gamma\"");
+    state_out.key_levels.major_short_gamma = ExtractDouble(response, "\"major_short_gamma\"");
+    if (!std::isnan(state_out.key_levels.major_positive))
+      out << "\n  major_positive: " << FormatDouble(state_out.key_levels.major_positive, 2);
+    if (!std::isnan(state_out.key_levels.major_negative))
+      out << "\n  major_negative: " << FormatDouble(state_out.key_levels.major_negative, 2);
+    if (!std::isnan(state_out.key_levels.major_long_gamma))
+      out << "\n  major_long_gamma: " << FormatDouble(state_out.key_levels.major_long_gamma, 2);
+    if (!std::isnan(state_out.key_levels.major_short_gamma))
+      out << "\n  major_short_gamma: " << FormatDouble(state_out.key_levels.major_short_gamma, 2);
+
+    // Mini contracts: show all, columns of 25 rows, sorted by strike desc
+    state_out.mini_contracts = ParseMiniContracts(response);
+    out << "\n\nMini Contracts (" << state_out.mini_contracts.size() << ", sorted desc by strike, columns of 25):\n";
+    out << FormatMiniContractsColumns(state_out.mini_contracts);
+
+    return out.str();
+  } catch (const std::exception& ex) {
+    error_out = std::string("parse error: ") + ex.what();
+    return {};
   } catch (...) {
-    // Ignore normalization failures; fall back to original.
+    error_out = "parse error: unknown";
+    return {};
   }
-
-  std::string generic = normalized.generic_string();
-  while (!generic.empty() && generic.back() == '/') {
-    generic.pop_back();
-  }
-  std::transform(generic.begin(), generic.end(), generic.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return generic;
-}
-
-std::string NormalizeFileNameKey(std::string file_name) {
-  std::transform(file_name.begin(), file_name.end(), file_name.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return file_name;
-}
-
-void ClearPlanDrawings(SCStudyGraphRef sc, PlanWatcherState& state) {
-  for (const int line_number : state.plan_drawing_line_numbers) {
-    if (line_number != 0) {
-      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line_number);
-    }
-  }
-  state.plan_drawing_line_numbers.clear();
-}
-
-PlanWatcherState* AcquirePlanState(SCStudyGraphRef sc) {
-  auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState));
-  if (state == nullptr) {
-    state = new PlanWatcherState{};
-    state->rendered_text = "[plan]\nAwaiting plan data...";
-    state->dirty = true;
-    sc.SetPersistentPointer(kPersistPlanState, state);
-  }
-  return state;
 }
 
 /**
- * @brief Освобождает persistent-состояние наблюдателя.
- * @param sc Контекст study.
+ * @brief Отрисовывает текстовое состояние в левом верхнем углу графика.
+ * @param sc Контекст ACSIL.
+ * @param line_number Идентификатор уже созданного текста (для обновления).
+ * @param text Многострочный текст.
  * @return void.
- * @note Вызвать при выгрузке DLL (sc.LastCallToFunction).
- * @warning Без вызова возникнет утечка памяти.
+ * @note Использует DRAWING_STATIONARY_TEXT.
+ * @warning Цвет/шрифт заданы жёстко; при необходимости вынесите в Inputs.
  */
-void ReleasePlanState(SCStudyGraphRef sc) {
-  auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState));
-  if (state != nullptr) {
-    ClearPlanDrawings(sc, *state);
-    sc.SetPersistentPointer(kPersistPlanState, nullptr);
-    delete state;
-  }
-}
-
-
-/**
- * @brief Мониторит YAML-план: валидирует входные параметры, отслеживает изменения и инициирует парсинг.
- * @param sc Контекст Sierra Chart для логирования.
- * @param state Persistent-состояние слежения.
- * @param plan_directory Каталог, в котором ожидается файл плана.
- * @param file_name Имя YAML-файла плана.
- * @param poll_interval_seconds Период опроса файла в секундах.
- * @return void.
- * @note Предотвращает лишние обращения к диску благодаря хранению времени последнего опроса.
- * @warning При ошибках не удаляет прошлую валидную копию плана, чтобы графика оставалась актуальной.
- */
-void UpdatePlanWatcher(SCStudyGraphRef sc,
-                       PlanWatcherState* state,
-                       const std::filesystem::path& plan_directory,
-                       const std::string& file_name,
-                       double poll_interval_seconds) {
-  if (state == nullptr) {
-    return;
-  }
-
-  const auto mark_plan_unavailable = [&](const std::string& text) {
-    state->plan.reset();
-    state->graphics_dirty = true;
-    if (state->rendered_text != text) {
-      state->rendered_text = text;
-      state->dirty = true;
-    }
-  };
-
-  const double interval = std::isfinite(poll_interval_seconds)
-                              ? (std::max)(poll_interval_seconds, kMinPlanCheckIntervalSeconds)
-                              : kDefaultPlanCheckIntervalSeconds;
-  if (state->last_interval_seconds != interval) {
-    state->last_interval_seconds = interval;
-    state->last_check_timestamp = 0.0;
-  }
-
-  const std::string directory_key = NormalizeDirectoryKey(plan_directory);
-  const std::string file_key = NormalizeFileNameKey(file_name);
-  const bool directory_changed = directory_key != state->last_directory_key;
-  const bool file_changed = file_key != state->last_file_name_key;
-  if (directory_changed || file_changed) {
-    state->last_directory_key = directory_key;
-    state->last_file_name_key = file_key;
-    state->has_last_write = false;
-    state->file_available = false;
-    state->status_known = false;
-    state->last_check_timestamp = 0.0;
-    state->plan_start_time = 0.0;
-    state->graphics_dirty = true;
-    state->plan.reset();
-    state->rendered_text = "[plan]\nAwaiting plan data...";
-    state->dirty = true;
-  }
-
-  if (plan_directory.empty()) {
-    if (!state->directory_reported_empty) {
-      LogError(sc, "[plan] Plan directory input is empty.");
-      state->directory_reported_empty = true;
-    }
-    mark_plan_unavailable("[plan]\nPlan directory is not set.");
-    return;
-  }
-  state->directory_reported_empty = false;
-
-  if (file_name.empty()) {
-    if (!state->file_name_reported_empty) {
-      LogError(sc, "[plan] Plan file name input is empty.");
-      state->file_name_reported_empty = true;
-    }
-    mark_plan_unavailable("[plan]\nPlan file name is not set.");
-    return;
-  }
-  state->file_name_reported_empty = false;
-
-  std::filesystem::path plan_path = plan_directory / file_name;
-
-  const double now = sc.CurrentSystemDateTime.GetAsDouble();
-  if (state->last_check_timestamp != 0.0) {
-    const double seconds_since_last = (now - state->last_check_timestamp) * kSecondsPerDay;
-    if (seconds_since_last < interval) {
-      return;
-    }
-  }
-  state->last_check_timestamp = now;
-
-  std::error_code ec;
-  const bool exists = std::filesystem::exists(plan_path, ec);
-  if (ec) {
-    LogError(sc, "[plan] Failed to query plan file: " + ec.message());
-    return;
-  }
-
-  if (!exists) {
-    if (!state->status_known || state->file_available) {
-      LogError(sc, "[plan] Plan file not found: " + plan_path.string());
-    }
-    state->status_known = true;
-    state->file_available = false;
-    state->has_last_write = false;
-    mark_plan_unavailable("[plan]\nPlan file is unavailable.");
-    return;
-  }
-
-  if (!state->status_known || !state->file_available || directory_changed || file_changed) {
-    LogInfo(sc, "[plan] Plan file detected: " + plan_path.string());
-  }
-  state->status_known = true;
-  state->file_available = true;
-
-  const auto current_write = std::filesystem::last_write_time(plan_path, ec);
-  if (ec) {
-    LogError(sc, "[plan] Failed to query last write time: " + ec.message());
-    return;
-  }
-
-  if (state->has_last_write && current_write == state->last_write) {
-    return;
-  }
-
-  state->last_write = current_write;
-  state->has_last_write = true;
-
-  LogInfo(sc, "[plan] Detected plan update: " + plan_path.string());
-
-  const auto load_result = sierra::core::LoadStudyPlanFromFile(plan_path);
-  if (!load_result.success()) {
-    LogError(sc, "[plan] File read: ERROR - " + load_result.error_message);
-    LogError(sc, "[plan] YAML parsed: ERROR");
-    return;
-  }
-
-  state->plan = std::make_shared<sierra::core::StudyPlan>(load_result.plan);
-  state->graphics_dirty = true;
-
-  SCDateTime fallback_time = 0.0;
-  if (sc.ArraySize > 0) {
-    fallback_time = sc.BaseDateTimeIn[sc.ArraySize - 1];
-  }
-  if (fallback_time == 0.0) {
-    fallback_time = now;
-  }
-  state->plan_start_time =
-      sierra::acsil::ConvertIso8601ToSCDateTime(state->plan->generated_at_iso8601, fallback_time);
-
-  std::ostringstream read_msg;
-  const auto file_size = std::filesystem::file_size(plan_path, ec);
-  if (ec) {
-    read_msg << "[plan] File read: OK (size unknown)";
-  } else {
-    read_msg << "[plan] File read: OK (" << file_size << " bytes)";
-  }
-  LogInfo(sc, read_msg.str());
-
-  std::size_t total_zones = 0;
-  std::size_t total_flips = 0;
-  for (const auto& [ticker, instrument] : state->plan->instruments) {
-    if (instrument.zone_long.has_value()) ++total_zones;
-    if (instrument.zone_short.has_value()) ++total_zones;
-    if (instrument.flip.has_value()) {
-      ++total_flips;
-    }
-  }
-
-  std::ostringstream parsed_msg;
-  parsed_msg << "[plan] YAML parsed: OK (version=" << state->plan->version << ", generated_at="
-             << state->plan->generated_at_iso8601 << ", instruments=" << state->plan->instruments.size()
-             << ", zones=" << total_zones << ", flips=" << total_flips << ")";
-  const std::string new_text =
-      sierra::core::FormatPlanAsTable(*state->plan, std::string(sc.Symbol.GetChars()));
-  if (state->rendered_text != new_text) {
-    state->rendered_text = new_text;
-    state->dirty = true;
-  }
-
-  LogInfo(sc, parsed_msg.str());
-}
-
-void RenderPlanTable(SCStudyGraphRef sc, PlanWatcherState& state) {
-  constexpr int kLeftAnchor = 1;
-  constexpr float kTopAnchorPercent = 100.0f;
-
+void RenderStatusText(SCStudyGraphRef sc, int& line_number, const std::string& text) {
   s_UseTool tool;
   tool.Clear();
   tool.ChartNumber = sc.ChartNumber;
   tool.DrawingType = DRAWING_STATIONARY_TEXT;
   tool.AddMethod = UTAM_ADD_OR_ADJUST;
-  tool.Color = RGB(255, 165, 0);
+  tool.Color = RGB(0, 200, 120);
   tool.FontFace = "Consolas";
-  tool.FontSize = 8;
+  tool.FontSize = 9;
   tool.FontBold = 0;
   tool.MultiLineLabel = 1;
   tool.TextAlignment = DT_LEFT | DT_TOP;
-  tool.TransparencyLevel = 0;
   tool.AddAsUserDrawnDrawing = 0;
   tool.UseRelativeVerticalValues = 1;
-  tool.BeginDateTime = kLeftAnchor;
-  tool.BeginValue = kTopAnchorPercent;
+  tool.BeginDateTime = 1;
+  tool.BeginValue = 100.0f;
   tool.EndValue = tool.BeginValue;
+  tool.TransparencyLevel = 0;
 
-  if (state.table_line_number != 0) {
-    tool.LineNumber = state.table_line_number;
+  tool.Text = text.c_str();
+  if (line_number != 0) {
+    tool.LineNumber = line_number;
   }
-
-  if (state.rendered_text.empty()) {
-    tool.Text = "";
-  } else {
-    tool.Text = state.rendered_text.c_str();
-  }
-
   sc.UseTool(tool);
-  state.table_line_number = tool.LineNumber;
-}
-
-const sierra::core::InstrumentPlan* FindInstrumentPlanForSymbol(SCStudyGraphRef sc,
-                                                                const sierra::core::StudyPlan& plan) {
-  if (plan.instruments.empty()) {
-    return nullptr;
-  }
-
-  const std::string symbol_upper = ToUpperASCII(sc.Symbol.GetChars());
-  const sierra::core::InstrumentPlan* fallback = nullptr;
-  const sierra::core::InstrumentPlan* best_match = nullptr;
-  std::size_t best_match_length = 0;
-
-  for (const auto& [ticker, instrument] : plan.instruments) {
-    if (fallback == nullptr) {
-      fallback = &instrument;
-    }
-    const std::string ticker_upper = ToUpperASCII(ticker);
-    if (!ticker_upper.empty() && symbol_upper.find(ticker_upper) != std::string::npos &&
-        ticker_upper.length() > best_match_length) {
-      best_match_length = ticker_upper.length();
-      best_match = &instrument;
-    }
-  }
-
-  return best_match != nullptr ? best_match : fallback;
-}
-
-void RenderPlanGraphics(SCStudyGraphRef sc,
-                        PlanWatcherState& state,
-                        const sierra::acsil::MarkerLineStyle& marker_style) {
-  if (state.plan == nullptr || sc.ArraySize <= 0) {
-    ClearPlanDrawings(sc, state);
-    return;
-  }
-
-  const auto* instrument = FindInstrumentPlanForSymbol(sc, *state.plan);
-  if (instrument == nullptr) {
-    ClearPlanDrawings(sc, state);
-    return;
-  }
-
-  ClearPlanDrawings(sc, state);
-
-  SCDateTime start_time = state.plan_start_time;
-  if (start_time == 0.0) {
-    start_time = sc.BaseDateTimeIn[0];
-  }
-  if (start_time == 0.0) {
-    start_time = sc.BaseDateTimeIn[sc.ArraySize - 1];
-  }
-
-  SCDateTime end_time = sc.BaseDateTimeIn[sc.ArraySize - 1] + 1.0;
-  if (end_time <= start_time) {
-    end_time = start_time + 1.0;
-  }
-
-  sierra::acsil::RenderInstrumentPlanGraphics(sc, *instrument, start_time, end_time,
-                                              state.plan_drawing_line_numbers,
-                                              state.plan->generated_at_iso8601, marker_style);
+  line_number = tool.LineNumber;
 }
 
 }  // namespace
 
-/// @brief Примерная обёртка ACSIL, вызывающая ядро и обслуживающая YAML-план.
-/// @param sc Контекст Sierra Chart для текущего study.
-/// @return void.
-/// @note В SetDefaults задаём параметры отображения и входы, далее выполняем расчёт SMA и мониторинг плана.
-/// @warning Требуются корректные переменные окружения `SIERRA_SDK_DIR` и `SIERRA_DATA_DIR` для успешной загрузки DLL.
+/**
+ * @brief Опрос API GexBot по выбранному греку с периодом 10–100 сек.
+ * @param sc Контекст ACSIL, предоставляемый Sierra Chart.
+ * @return void.
+ * @note Использует libcurl (GET) и RapidYAML для парсинга JSON-ответа. Результат выводится текстом на график.
+ * @warning Требуются корректные Inputs: API Key, Greek, период опроса. Тикер маппится из символа графика (ES/MES→SPX_ES, NQ/MNQ→NQ_NDX).
+ */
 SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
-  sierra::acsil::LogDllStartup(sc);
-  SCSubgraphRef ma = sc.Subgraph[0];
-  SCInputRef periodInput = sc.Input[0];
-  SCInputRef planDirectoryInput = sc.Input[1];
-  SCInputRef planFileNameInput = sc.Input[2];
-  SCInputRef planPollIntervalInput = sc.Input[3];
-  SCInputRef markerColorInput = sc.Input[4];
-  SCInputRef markerWidthInput = sc.Input[5];
-  SCInputRef markerStyleInput = sc.Input[6];
+  static bool curl_global_init_done = false;
+  if (!curl_global_init_done) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl_global_init_done = true;
+  }
+
+  SCInputRef apiKeyInput = sc.Input[0];
+  SCInputRef greekInput = sc.Input[1];
+  SCInputRef pollIntervalInput = sc.Input[2];
 
   if (sc.SetDefaults) {
-    sc.GraphName = "SierraStudy - Moving Average";
-    sc.StudyDescription = "Example ACSIL study wrapping the core moving average and YAML plan monitoring.";
+    sc.GraphName = "SierraStudy - GexBot Poller";
+    sc.StudyDescription = "Polls GexBot API for option greeks and shows JSON response.";
     sc.AutoLoop = 1;
     sc.FreeDLL = 1;
     sc.GraphRegion = 0;
     sc.UpdateAlways = 1;
 
-    ma.Name = "Moving Average";
-    ma.DrawStyle = DRAWSTYLE_LINE;
-    ma.PrimaryColor = RGB(0, 128, 255);
-    ma.LineWidth = 2;
-    ma.DrawZeros = false;
+    sc.Subgraph[0].Name = "Unused";
+    sc.Subgraph[0].DrawStyle = DRAWSTYLE_IGNORE;
+    sc.Subgraph[0].DrawZeros = false;
 
-    periodInput.Name = "Period";
-    periodInput.SetInt(20);
-    periodInput.SetIntLimits(1, 500);
+    apiKeyInput.Name = "GexBot API Key";
+    apiKeyInput.SetString("IZiEb6yDrgxE");
 
-    planDirectoryInput.Name = "Plan Directory";
-    planDirectoryInput.SetString("C:\\2308\\Data\\test_files");
+    greekInput.Name = "Greek";
+    greekInput.SetCustomInputStrings(
+        "delta_zero;gamma_zero;delta_one;gamma_one;charm_zero;vanna_zero;charm_one;vanna_one");
+    greekInput.SetCustomInputIndex(1);  // gamma_zero
 
-    planFileNameInput.Name = "Plan File Name";
-    planFileNameInput.SetString("nq_intraday_flip_example.yaml");
-
-    planPollIntervalInput.Name = "Plan Poll Interval (seconds)";
-    planPollIntervalInput.SetFloat(static_cast<float>(kDefaultPlanCheckIntervalSeconds));
-    planPollIntervalInput.SetFloatLimits(static_cast<float>(kMinPlanCheckIntervalSeconds), 600.0f);
-
-    markerColorInput.Name = "Generated Marker Color";
-    markerColorInput.SetColor(RGB(255, 165, 0));
-
-    markerWidthInput.Name = "Generated Marker Line Width";
-    markerWidthInput.SetInt(1);
-    markerWidthInput.SetIntLimits(1, 10);
-
-    markerStyleInput.Name = "Generated Marker Line Style";
-    markerStyleInput.SetCustomInputStrings("Solid;Dash;Dot;DashDot;DashDotDot");
-    markerStyleInput.SetCustomInputIndex(2);  // Dot by default.
-
-    sc.DataStartIndex = periodInput.GetInt() - 1;
+    pollIntervalInput.Name = "Poll Interval (seconds)";
+    pollIntervalInput.SetFloat(static_cast<float>(kDefaultPollInterval));
+    pollIntervalInput.SetFloatLimits(static_cast<float>(kMinPollInterval),
+                                     static_cast<float>(kMaxPollInterval));
     return;
   }
 
-  const auto make_marker_style = [&]() -> sierra::acsil::MarkerLineStyle {
-    int style_index = markerStyleInput.GetIndex();
-    if (style_index < 0 || style_index >= static_cast<int>(kLineStyleOptions.size())) {
-      style_index = 2;
-    }
-    sierra::acsil::MarkerLineStyle style{};
-    style.color = markerColorInput.GetColor();
-    style.width = (std::max)(1, markerWidthInput.GetInt());
-    style.style = kLineStyleOptions[static_cast<std::size_t>(style_index)];
-    return style;
-  };
+  auto* state = static_cast<GexState*>(sc.GetPersistentPointer(kPersistState));
+  if (state == nullptr) {
+    state = new GexState{};
+    sc.SetPersistentPointer(kPersistState, state);
+  }
 
   if (sc.LastCallToFunction) {
-    if (auto* state = static_cast<PlanWatcherState*>(sc.GetPersistentPointer(kPersistPlanState))) {
-      const auto marker_style = make_marker_style();
-      state->rendered_text.clear();
-      RenderPlanTable(sc, *state);
-      RenderPlanGraphics(sc, *state, marker_style);
-    }
-    const int debug_line = sc.GetPersistentInt(kPersistDebugLine);
-    if (debug_line != 0) {
-      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, debug_line);
-      sc.SetPersistentInt(kPersistDebugLine, 0);
-    }
-    ReleasePlanState(sc);
+    sc.SetPersistentPointer(kPersistState, nullptr);
+    delete state;
     return;
   }
 
-  EnsureLogging(sc);
+  state->poll_interval =
+      std::clamp(static_cast<double>(pollIntervalInput.GetFloat()), kMinPollInterval, kMaxPollInterval);
 
-  auto* state = AcquirePlanState(sc);
+  std::string ticker = MapSymbolToTicker(sc.Symbol);
+  const int greek_index = greekInput.GetIndex();
+  std::string greek = "delta_zero";
+  if (greek_index >= 0) {
+    const SCString g = greekInput.GetSelectedCustomString();
+    if (g.GetLength() > 0) greek = g.GetChars();
+  }
+  const SCString key_input = apiKeyInput.GetString();
+  const std::string api_key = key_input.GetChars();
 
-  std::filesystem::path plan_directory;
-  const SCString directory_input = planDirectoryInput.GetString();
-  if (directory_input.GetLength() > 0) {
-    plan_directory = std::filesystem::path(directory_input.GetChars());
+  const double now = sc.CurrentSystemDateTime.GetAsDouble();
+  if (SecondsSince(now, state->last_poll_time) >= state->poll_interval) {
+    state->last_poll_time = now;
+    std::string error;
+    const std::string text = FetchGexbotState(ticker, greek, api_key, error, *state);
+    if (!error.empty()) {
+      state->last_text = "GexBot error: " + error;
+      sc.AddMessageToLog(state->last_text.c_str(), 1);
+    } else if (!text.empty()) {
+      state->last_text = text;
+    }
   }
 
-  std::string plan_file_name;
-  const SCString file_input = planFileNameInput.GetString();
-  if (file_input.GetLength() > 0) {
-    plan_file_name = file_input.GetChars();
+  if (state->last_text.empty()) {
+    state->last_text = "Waiting for GexBot data...";
   }
 
-  const double poll_interval = static_cast<double>(planPollIntervalInput.GetFloat());
-
-  UpdatePlanWatcher(sc, state, plan_directory, plan_file_name, poll_interval);
-  const auto marker_style = make_marker_style();
-  RenderPlanTable(sc, *state);
-  RenderPlanGraphics(sc, *state, marker_style);
-  int debug_line_number = sc.GetPersistentInt(kPersistDebugLine);
-  debug_line_number = sierra::acsil::RenderStandaloneDebugLine(sc, debug_line_number);
-  sc.SetPersistentInt(kPersistDebugLine, debug_line_number);
-
-  const int period = (std::max)(1, periodInput.GetInt());
-  sc.DataStartIndex = period - 1;
-
-  const int length = sc.ArraySize;
-  if (length <= 0) {
-    ma[sc.Index] = std::numeric_limits<float>::quiet_NaN();
-    return;
-  }
-
-  std::vector<double> closes(static_cast<std::size_t>(sc.Index + 1));
-  for (int i = 0; i <= sc.Index; ++i) {
-    closes[static_cast<std::size_t>(i)] = sc.Close[i];
-  }
-
-  const auto averages =
-      sierra::core::moving_average(closes, static_cast<std::size_t>(period));
-  const double value = averages.back();
-  ma[sc.Index] = std::isnan(value) ? std::numeric_limits<float>::quiet_NaN()
-                                   : static_cast<float>(value);
+  static int line_number = 0;
+  RenderStatusText(sc, line_number, state->last_text);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -37,7 +37,7 @@
         "-File",
         "${workspaceFolder}/scripts/HotSwap.ps1",
         "-Dll",
-        "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy.dll",
+        "${workspaceFolder}/out/x64/${input:cfg}/SierraStudy_GexBot.dll",
         "-SierraDataDir",
         "${env:SIERRA_DATA_DIR}"
       ]

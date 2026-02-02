@@ -66,7 +66,7 @@ try {
 
 try {
     Copy-TestFiles -RepoRoot $PSScriptRoot -DestinationRoot $env:SIERRA_DATA_DIR
-    pwsh -NoProfile -File "$PSScriptRoot\scripts\HotSwap.ps1" -Dll "$PSScriptRoot\out\x64\Debug\SierraStudy.dll" -SierraDataDir $env:SIERRA_DATA_DIR -AutoRemoteFallback
+    pwsh -NoProfile -File "$PSScriptRoot\scripts\HotSwap.ps1" -Dll "$PSScriptRoot\out\x64\Debug\SierraStudy_GexBot.dll" -SierraDataDir $env:SIERRA_DATA_DIR -AutoRemoteFallback
     Write-Host "[deploy] ok"
 } catch {
     Write-Host "[deploy] fail: $($_.Exception.Message)"

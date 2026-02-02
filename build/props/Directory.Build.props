@@ -6,6 +6,11 @@
     <CharacterSet>Unicode</CharacterSet>
     <WarningLevel>Level4</WarningLevel>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Понижаем шум от внешних SDK (Sierra). -->
+    <!-- Внешние заголовки (Sierra SDK и др.) без предупреждений. -->
+    <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+    <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+    <ExternalDiagnostics>false</ExternalDiagnostics>
 
     <!-- vcpkg manifest settings -->
     <VcpkgRoot Condition="'$(VCPKG_ROOT)'!=''">$(VCPKG_ROOT)</VcpkgRoot>
@@ -20,12 +25,18 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <WarningLevel>Level4</WarningLevel>
       <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExternalDiagnostics>false</ExternalDiagnostics>
       <AdditionalIncludeDirectories>
         $(SolutionDir)projects\Core\include;
         $(SolutionDir)projects\Wrapper\include;
         $(SIERRA_SDK_DIR)\ACS_Source;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
+      <ExternalIncludeDirectories>
+        $(SIERRA_SDK_DIR)\ACS_Source;
+        %(ExternalIncludeDirectories)
+      </ExternalIncludeDirectories>
       <PreprocessorDefinitions>
         NOMINMAX;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;
         %(PreprocessorDefinitions)

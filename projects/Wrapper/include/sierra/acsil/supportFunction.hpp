@@ -1,6 +1,8 @@
 #pragma once
 
+#pragma warning(push, 0)
 #include "SierraChart.h"
+#pragma warning(pop)
 
 #include <string>
 #include <vector>

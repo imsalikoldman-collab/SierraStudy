@@ -10,7 +10,8 @@
 - **Требования**: Sierra Chart должна слушать UDP на `127.0.0.1:11099` и принимать команды `RELEASE_DLL--<path>` / `ALLOW_LOAD_DLL--<path>`.
 
 ## Предупреждения из ACSIL заголовков Sierra Chart
-- **Симптом**: множество C4100/C4245/C4458/C4201 и т.п. из `C:\\2308\\ACS_Source\\*.h`.
-- **Решение**: внешние заголовки переведены на `ExternalWarningLevel=TurnOffAllWarnings` (`/external:W0`), `ExternalDiagnostics=false`; включения `SierraChart.h` завернуты в `#pragma warning(push, 0)`. Собственный код остаётся на `/W4`.  
-  Дополнительно: если видите 400 с текстом "Unknown ticker symbol", убедитесь, что маппинг символа подходит (ES/MES→ES_SPX, NQ/MNQ→NQ_NDX). При неверном греке выберите значение из списка: delta_zero, gamma_zero, delta_one, gamma_one, charm_zero, vanna_zero, charm_one, vanna_one (дефолт gamma_zero).
-- **Итог**: вывод от Sierra SDK подавлен, сборка не падает по этим предупреждениям.
+- **Симптом**: при сборке Wrapper появляются десятки предупреждений (C4100, C4245, C4458, C4121/C4201), все указывают на файлы `C:\\2308\\ACS_Source\\*.h`.
+- **Причина**: особенности реализаций в сторонних заголовках Sierra Chart; наш код Core/Wrapper/Tests их не генерирует.
+- **Что делаем**:
+  - Сохраняем уровень `/W4`, но оставляем `TreatWarningsAsErrors=false`, чтобы сборка не падала из‑за чужих хедеров.
+  - При желании шум можно уменьшить, опустив уровень для внешних include (`/external:W3`) или точечно подавив коды `/wd4100 /wd4245 /wd4458` в Wrapper; пока не применяем, чтобы видеть новые проблемы.
