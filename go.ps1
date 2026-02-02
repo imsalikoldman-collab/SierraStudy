@@ -1,9 +1,9 @@
 $ErrorActionPreference = 'Stop'
 if (-not $env:SIERRA_DATA_DIR) {
-    $env:SIERRA_DATA_DIR = 'C:\2308\Data'
+    $env:SIERRA_DATA_DIR = 'D:\2308\Data'
 }
-if (-not $env:VCPKG_ROOT -and (Test-Path 'C:\dev\vcpkg')) {
-    $env:VCPKG_ROOT = 'C:\dev\vcpkg'
+if (-not $env:VCPKG_ROOT -and (Test-Path 'D:\dev\vcpkg')) {
+    $env:VCPKG_ROOT = 'D:\dev\vcpkg'
 }
 if (-not $env:VCPKG_DEFAULT_TRIPLET) {
     $env:VCPKG_DEFAULT_TRIPLET = 'x64-windows-static'

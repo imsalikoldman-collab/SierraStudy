@@ -14,7 +14,7 @@
 
     <!-- vcpkg manifest settings -->
     <VcpkgRoot Condition="'$(VCPKG_ROOT)'!=''">$(VCPKG_ROOT)</VcpkgRoot>
-    <VcpkgRoot Condition="'$(VcpkgRoot)'==''">C:\dev\vcpkg</VcpkgRoot>
+    <VcpkgRoot Condition="'$(VcpkgRoot)'==''">D:\dev\vcpkg</VcpkgRoot>
     <VcpkgTriplet Condition="'$(VCPKG_DEFAULT_TRIPLET)'!=''">$(VCPKG_DEFAULT_TRIPLET)</VcpkgTriplet>
     <VcpkgTriplet Condition="'$(VcpkgTriplet)'==''">x64-windows-static</VcpkgTriplet>
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
@@ -30,6 +30,7 @@
       <AdditionalIncludeDirectories>
         $(SolutionDir)projects\Core\include;
         $(SolutionDir)projects\Wrapper\include;
+        $(VcpkgInstalledDir)\$(VcpkgTriplet)\include;
         $(SIERRA_SDK_DIR)\ACS_Source;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>

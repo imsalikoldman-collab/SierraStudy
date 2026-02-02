@@ -129,8 +129,8 @@ if (-not $SkipTests) {
 
 if (-not $NoHotSwap) {
   if ([string]::IsNullOrWhiteSpace($SierraDataDir)) {
-    if (Test-Path -LiteralPath 'C:\2308\Data') {
-      $SierraDataDir = 'C:\2308\Data'
+    if (Test-Path -LiteralPath 'D:\2308\Data') {
+      $SierraDataDir = 'D:\2308\Data'
     } elseif (-not [string]::IsNullOrWhiteSpace($env:SIERRA_DATA_DIR)) {
       $SierraDataDir = $env:SIERRA_DATA_DIR
     }

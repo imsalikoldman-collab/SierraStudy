@@ -35,7 +35,7 @@
 - `src/*.cpp` — реализация ACSIL-адаптера и вспомогательных функций.
 
 ### Ключевые элементы
-- `study.cpp` — SCSFExport `scsf_SierraStudyMovingAverage` (историческое имя) реализует опрос GexBot API:
+- `study.cpp` — SCSFExport `scsf_SierraStudyGexBotPoller` реализует опрос GexBot API:
   - маппинг символа графика: ES/MES→`ES_SPX`, NQ/MNQ→`NQ_NDX`;
   - Inputs: `GexBot API Key` (дефолт IZiEb6yDrgxE), `Greek` из списка `delta_zero, gamma_zero, delta_one, gamma_one, charm_zero, vanna_zero, charm_one, vanna_one` (дефолт **gamma_zero**), `Poll Interval (seconds)` (10–100, дефолт 30);
   - HTTP GET `https://api.gexbot.com/{TICKER}/state/{GREEK}?key=...` через libcurl; парсинг JSON-ответа RapidYAML (как YAML-подмножество);

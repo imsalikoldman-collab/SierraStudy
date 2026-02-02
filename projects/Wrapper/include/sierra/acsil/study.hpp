@@ -4,9 +4,9 @@
 #include "SierraChart.h"
 #pragma warning(pop)
 
-/// @brief Заглушка точки входа (SCSFExport) для пользовательского исследования.
+/// @brief Точка входа (SCSFExport) исследования GexBot Poller.
 /// @param sc Интерфейс ACSIL, предоставляемый Sierra Chart при каждом вызове.
 /// @return void.
 /// @note Декларация нужна, чтобы её могли видеть study.cpp и потенциальные будущие модули обёртки.
-/// @warning Имя и сигнатура должны совпадать с реализацией; логика пока отсутствует.
-SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc);
+/// @warning Имя и сигнатура должны совпадать с реализацией; любое расхождение приведёт к отсутствию study в списке.
+SCSFExport scsf_SierraStudyGexBotPoller(SCStudyGraphRef sc);

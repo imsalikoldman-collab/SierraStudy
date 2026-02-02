@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Platform = "x64",
-    [string]$Destination = "C:\2308\Data\",
+    [string]$Destination = "D:\2308\Data\",
     [int]$WaitTimeoutSeconds = 20,
     [int]$WaitIntervalMilliseconds = 250,
     [switch]$SkipWait,

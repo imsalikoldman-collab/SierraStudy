@@ -39,9 +39,20 @@ struct GexState {
     double major_long_gamma = std::numeric_limits<double>::quiet_NaN();
     double major_short_gamma = std::numeric_limits<double>::quiet_NaN();
   } key_levels;
+  /**
+   * @brief Мини‑контракт из ответа GexBot.
+   * @param strike Страйк (элемент 0 массива mini_contracts).
+   * @param call_ivol Имплай волатильность call (элемент 1).
+   * @param put_ivol Имплай волатильность put (элемент 2).
+   * @param specified_greek Значение выбранного грека (элемент 3).
+   * @param priors История грека (элемент 4 — массив значений).
+   */
   struct MiniContract {
     double strike = std::numeric_limits<double>::quiet_NaN();
+    double call_ivol = std::numeric_limits<double>::quiet_NaN();
+    double put_ivol = std::numeric_limits<double>::quiet_NaN();
     double specified_greek = std::numeric_limits<double>::quiet_NaN();
+    std::vector<double> priors;
   };
   std::vector<MiniContract> mini_contracts;
 };
@@ -163,8 +174,8 @@ std::vector<GexState::MiniContract> ParseMiniContracts(const std::string& body) 
     }
     // detect inner array start
     if (depth == 2 && body[i] == '[') {
-      // parse inner array elements
       size_t j = i + 1;
+
       auto read_number = [&](size_t& idx) -> double {
         while (idx < body.size() && (body[idx] == ' ' || body[idx] == '\t')) ++idx;
         size_t end = idx;
@@ -179,17 +190,57 @@ std::vector<GexState::MiniContract> ParseMiniContracts(const std::string& body) 
         idx = end;
         return v;
       };
+
+      auto read_priors_array = [&](size_t& idx) -> std::vector<double> {
+        std::vector<double> values;
+        // skip whitespace
+        while (idx < body.size() && (body[idx] == ' ' || body[idx] == '\t')) ++idx;
+        if (idx >= body.size() || body[idx] != '[') return values;
+        int depth_priors = 0;
+        for (; idx < body.size(); ++idx) {
+          char pc = body[idx];
+          if (pc == '[') { depth_priors++; ++idx; break; }
+        }
+        // read numbers until we close priors array
+        while (idx < body.size()) {
+          while (idx < body.size() && (body[idx] == ' ' || body[idx] == '\t')) ++idx;
+          if (idx >= body.size()) break;
+          if (body[idx] == ']') { depth_priors--; ++idx; break; }
+          double v = read_number(idx);
+          values.push_back(v);
+          // move past comma if present
+          if (idx < body.size() && body[idx] == ',') ++idx;
+        }
+        return values;
+      };
+
       GexState::MiniContract mc;
-      // element0: strike
-      mc.strike = read_number(j);
-      // skip element1, element2
-      for (int skip = 0; skip < 2; ++skip) {
-        j = body.find_first_of(",]", j);
-        if (j == std::string::npos) break;
-        ++j;
-      }
+      mc.strike = read_number(j);  // element 0
+
+      // element1: call_ivol
+      j = body.find_first_of(",]", j);
+      if (j == std::string::npos) continue;
+      ++j;
+      mc.call_ivol = read_number(j);
+
+      // element2: put_ivol
+      j = body.find_first_of(",]", j);
+      if (j == std::string::npos) continue;
+      ++j;
+      mc.put_ivol = read_number(j);
+
       // element3: specified_greek
+      j = body.find_first_of(",]", j);
+      if (j == std::string::npos) continue;
+      ++j;
       mc.specified_greek = read_number(j);
+
+      // element4: priors array (optional)
+      j = body.find('[', j);
+      if (j != std::string::npos) {
+        mc.priors = read_priors_array(j);
+      }
+
       result.push_back(mc);
     }
   }
@@ -321,6 +372,8 @@ std::string FetchGexbotState(const std::string& ticker,
     out << "\n\nMini Contracts (" << state_out.mini_contracts.size() << ", sorted desc by strike, columns of 25):\n";
     out << FormatMiniContractsColumns(state_out.mini_contracts);
 
+
+
     return out.str();
   } catch (const std::exception& ex) {
     error_out = std::string("parse error: ") + ex.what();
@@ -376,7 +429,7 @@ void RenderStatusText(SCStudyGraphRef sc, int& line_number, const std::string& t
  * @note Использует libcurl (GET) и RapidYAML для парсинга JSON-ответа. Результат выводится текстом на график.
  * @warning Требуются корректные Inputs: API Key, Greek, период опроса. Тикер маппится из символа графика (ES/MES→SPX_ES, NQ/MNQ→NQ_NDX).
  */
-SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
+SCSFExport scsf_SierraStudyGexBotPoller(SCStudyGraphRef sc) {
   static bool curl_global_init_done = false;
   if (!curl_global_init_done) {
     curl_global_init(CURL_GLOBAL_DEFAULT);

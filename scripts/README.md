@@ -11,7 +11,7 @@
 
 ## Настройки
 - Для ручного указания пути к MSBuild создайте `scripts/msbuild.path.ps1` с переменной `$MsbuildPath = 'C:\Full\Path\To\MSBuild.exe'`.
-- Переменные окружения: `SIERRA_SDK_DIR` (например `C:\2308`) и `SIERRA_DATA_DIR` (например `C:\2308\Data`) должны быть заданы до запуска сценариев.
+- Переменные окружения: `SIERRA_SDK_DIR` (например `D:\2308`) и `SIERRA_DATA_DIR` (например `D:\2308\Data`) должны быть заданы до запуска сценариев.
 
 ## Примеры использования
 ```powershell
@@ -33,7 +33,7 @@ pwsh -File scripts\ `BuildAndSwap.ps1`  -Configuration Release -RemoteHotSwap -S
 
 ## Действия в Sierra Chart после обновления DLL
 1. Меню `Analysis → Build → Release All DLLs and Deny Load`, чтобы гарантированно отпустить файл.
-2. `Analysis → Add Custom Study → Add Custom Study → Browse` и выберите `C:\2308\Data\SierraStudy_GexBot.dll`. После этого исследование появится как шаблон `SierraStudy - Template`.
+2. `Analysis → Add Custom Study → Add Custom Study → Browse` и выберите `D:\2308\Data\SierraStudy_GexBot.dll`. После этого исследование появится как шаблон `SierraStudy - Template`.
 
 ### Примечания
 - По умолчанию  `BuildAndSwap.ps1`  при обнаружении блокировки файла пытается выполнить удалённый сценарий Release/Allow. Отключить поведение можно ключом  `-DisableRemoteFallback` .

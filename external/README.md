@@ -6,8 +6,8 @@
 
 Актуальные значения переменных окружения на рабочей машине:
 ```
-SIERRA_SDK_DIR = C:\2308
-SIERRA_DATA_DIR = C:\2308\Data
+SIERRA_SDK_DIR = D:\2308
+SIERRA_DATA_DIR = D:\2308\Data
 VCPKG_ROOT     = C:\dev\vcpkg
 VCPKG_INSTALLED_DIR = C:\dev\vcpkg\installed-manifest
 ```

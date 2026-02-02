@@ -62,7 +62,7 @@ SierraStudy/
 
 **Переменные окружения (на каждой машине):**
 - `SIERRA_SDK_DIR` → папка с заголовками ACSIL (обычно `.../SierraChart/ACS_Source`).
-- `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `C:\2308\Data`).
+- `SIERRA_DATA_DIR` → папка *Data* Sierra Chart (например `D:\2308\Data`).
 - `VCPKG_ROOT` → путь к установленному vcpkg (по умолчанию `C:\dev\vcpkg`). `VCPKG_DEFAULT_TRIPLET` — рекомендуем `x64-windows-static`.
 - Целевая рабочая версия Sierra Chart: **2308** (используется при тестировании и hot-swap).
 

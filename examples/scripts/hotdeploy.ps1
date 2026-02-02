@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Platform = "x64",
-    [string]$Destination = "C:\2308\Data\",
+    [string]$Destination = "D:\2308\Data\",
     [string]$SierraHost = "127.0.0.1",
     [int]$SierraPort = 11099,
     [string]$ReleaseCommandFormat = "RELEASE_DLL--{0}",

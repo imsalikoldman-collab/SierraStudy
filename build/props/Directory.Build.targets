@@ -1,0 +1,5 @@
+<Project>
+  <!-- Подключаем цели vcpkg после определения всех свойств. -->
+  <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets"
+          Condition="Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets') and '$(VcpkgTargetsImported)'!='true'" />
+</Project>
