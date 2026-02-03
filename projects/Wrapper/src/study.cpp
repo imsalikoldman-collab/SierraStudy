@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -45,6 +46,10 @@ struct GexState {
     double specified_greek = std::numeric_limits<double>::quiet_NaN();
   };
   std::vector<MiniContract> mini_contracts;
+  // Состояние панельного отображения греков.
+  double last_visible_low = std::numeric_limits<double>::quiet_NaN();
+  double last_visible_high = std::numeric_limits<double>::quiet_NaN();
+  std::vector<int> panel_line_numbers;
 };
 
 /**
@@ -207,7 +212,9 @@ std::vector<GexState::MiniContract> ParseMiniContracts(const ryml::ConstNodeRef&
       continue;
     }
 
-    result.push_back(GexState::MiniContract{strike, greek});
+    if (greek > 0.0) {
+      result.push_back(GexState::MiniContract{strike, greek});
+    }
   }
 
   std::sort(result.begin(), result.end(),
@@ -215,28 +222,269 @@ std::vector<GexState::MiniContract> ParseMiniContracts(const ryml::ConstNodeRef&
   return result;
 }
 
-// Формирует таблицу мини-контрактов в колонках по 25 строк, сортировка по убыванию strike.
+/**
+ * @brief Удаляет ранее созданные линии панели из графика.
+ * @param sc Контекст Sierra Chart.
+ * @param line_numbers Номера линий, подлежащие удалению.
+ * @note Позволяет избежать захламления графика объектами UseTool.
+ * @warning Перед новым рендером всегда очищайте старые линии.
+ */
+void ClearGreekPanelLines(SCStudyGraphRef sc, std::vector<int>& line_numbers) {
+  for (const int line : line_numbers) {
+    if (line != 0) {
+      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line);
+    }
+  }
+  line_numbers.clear();
+}
+
+/**
+ * @brief Описывает уровень для панельной отрисовки.
+ */
+struct GreekPanelLevel {
+  double strike{};
+  double greek{};
+};
+
+/**
+ * @brief Формирует уникальный набор уровней (max greek на strike) в пределах видимого диапазона.
+ * @param contracts Вектор mini_contracts из состояния.
+ * @param visible_low Нижняя граница видимого ценового диапазона.
+ * @param visible_high Верхняя граница видимого ценового диапазона.
+ * @return Отсортированный по strike вектор уровней (все положительные внутри диапазона).
+ * @note Дубликаты объединяются по максимуму положительного значения.
+ */
+std::vector<GreekPanelLevel> BuildVisiblePositiveLevels(const std::vector<GexState::MiniContract>& contracts,
+                                                        double visible_low,
+                                                        double visible_high) {
+  constexpr double kEps = 1e-9;
+  double low = std::min(visible_low, visible_high);
+  double high = std::max(visible_low, visible_high);
+  if (std::abs(high - low) < kEps) {
+    high = low + 1.0;
+  }
+  std::map<double, double> best_by_strike;
+  for (const auto& mc : contracts) {
+    if (std::isnan(mc.strike) || std::isnan(mc.specified_greek)) {
+      continue;
+    }
+    if (mc.specified_greek <= 0.0) {
+      continue;
+    }
+    if (mc.strike < low - kEps || mc.strike > high + kEps) {
+      continue;
+    }
+    auto it = best_by_strike.lower_bound(mc.strike);
+    bool merged = false;
+    if (it != best_by_strike.end() && std::abs(it->first - mc.strike) < kEps) {
+      it->second = std::max(it->second, mc.specified_greek);
+      merged = true;
+    } else if (it != best_by_strike.begin()) {
+      auto prev = std::prev(it);
+      if (std::abs(prev->first - mc.strike) < kEps) {
+        prev->second = std::max(prev->second, mc.specified_greek);
+        merged = true;
+      }
+    }
+    if (!merged) {
+      best_by_strike.emplace(mc.strike, mc.specified_greek);
+    }
+  }
+
+  std::vector<GreekPanelLevel> levels;
+  levels.reserve(best_by_strike.size());
+  for (const auto& [strike, greek] : best_by_strike) {
+    levels.push_back(GreekPanelLevel{strike, greek});
+  }
+  return levels;
+}
+
+/**
+ * @brief Вычисляет количество баров, соответствующее заданной длине в пикселях.
+ * @param sc Контекст Sierra Chart.
+ * @param length_px Требуемая длина в пикселях.
+ * @return Целое количество баров (минимум 1).
+ * @note Использует усреднённый пиксельный шаг между первым и последним видимым баром.
+ * @warning При нулевой ширине возвращает 1, чтобы предотвратить нулевую длину линий.
+ */
+int PixelsToBars(SCStudyGraphRef sc, double length_px) {
+  const int first = sc.IndexOfFirstVisibleBar;
+  const int last = sc.IndexOfLastVisibleBar;
+  if (last <= first) {
+    return 1;
+  }
+  const int x_first = sc.BarIndexToXPixelCoordinate(first);
+  const int x_last = sc.BarIndexToXPixelCoordinate(last);
+  const double px_per_bar = static_cast<double>(x_last - x_first) / static_cast<double>(last - first);
+  if (px_per_bar <= 0.0) {
+    return 1;
+  }
+  const double bars = length_px / px_per_bar;
+  return std::max(1, static_cast<int>(std::round(bars)));
+}
+
+/**
+ * @brief Отрисовывает панель уровней specified_greek справа от графика.
+ * @param sc Контекст ACSIL.
+ * @param state Persistent-состояние GexBot опросчика.
+ * @param display_mode 1 = Positive Only; 2 = All (заглушка).
+ * @param panel_width_px Ширина панели в пикселях.
+ * @param panel_offset_px Отступ панели от правой границы графика (пиксели).
+ * @param line_color Цвет линий.
+ * @param line_width Толщина линий.
+ * @param auto_scale_on Флаг автонормализации (на текущем этапе всегда true).
+ * @note Логика следует docs/tech_task_gexbot_greek_panel.md (Mode 1).
+ * @warning Mode 2 реализован как заглушка без отрисовки.
+ */
+void RenderGreekPanel(SCStudyGraphRef sc,
+                      GexState& state,
+                      int display_mode,
+                      int panel_width_px,
+                      int panel_offset_px,
+                      COLORREF line_color,
+                      int line_width,
+                      bool auto_scale_on,
+                      bool debug_log) {
+  // Заглушка для Mode 2 — просто очищаем старые линии.
+  if (display_mode == 2) {
+    ClearGreekPanelLines(sc, state.panel_line_numbers);
+    return;
+  }
+
+  if (panel_width_px <= 0 || line_width <= 0 || state.mini_contracts.empty()) {
+    ClearGreekPanelLines(sc, state.panel_line_numbers);
+    return;
+  }
+
+  const double visible_low = sc.ScaleRangeBottom;
+  const double visible_high = sc.ScaleRangeTop;
+
+  // Подсчёт всех позитивных уровней для fallback.
+  int total_positive = 0;
+  for (const auto& mc : state.mini_contracts) {
+    if (!std::isnan(mc.specified_greek) && mc.specified_greek > 0.0) {
+      ++total_positive;
+    }
+  }
+
+  const auto levels = BuildVisiblePositiveLevels(state.mini_contracts, visible_low, visible_high);
+  std::vector<GreekPanelLevel> levels_to_draw = levels;
+  if (levels_to_draw.empty() && total_positive > 0) {
+    // Если все уровни вне диапазона — рисуем все позитивные.
+    for (const auto& mc : state.mini_contracts) {
+      if (!std::isnan(mc.specified_greek) && mc.specified_greek > 0.0) {
+        levels_to_draw.push_back(GreekPanelLevel{mc.strike, mc.specified_greek});
+      }
+    }
+  }
+  if (levels_to_draw.empty()) {
+    ClearGreekPanelLines(sc, state.panel_line_numbers);
+    state.last_visible_low = visible_low;
+    state.last_visible_high = visible_high;
+    if (debug_log) {
+      sc.AddMessageToLog("GexPanel: no positive levels", 0);
+    }
+    return;
+  }
+
+  double max_greek = 0.0;
+  for (const auto& level : levels_to_draw) {
+    max_greek = std::max(max_greek, level.greek);
+  }
+  if (max_greek <= 0.0 || !auto_scale_on) {
+    ClearGreekPanelLines(sc, state.panel_line_numbers);
+    state.last_visible_low = visible_low;
+    state.last_visible_high = visible_high;
+    return;
+  }
+
+  const int right_bar = sc.IndexOfLastVisibleBar;
+  const int left_bar = sc.IndexOfFirstVisibleBar;
+  if (right_bar < 0 || left_bar < 0 || sc.ArraySize <= 0) {
+    ClearGreekPanelLines(sc, state.panel_line_numbers);
+    return;
+  }
+
+  const int x_first = sc.BarIndexToXPixelCoordinate(left_bar);
+  const int x_last = sc.BarIndexToXPixelCoordinate(right_bar);
+  const int width_px = std::max(1, x_last - x_first);
+  const int visible_bars = std::max(1, right_bar - left_bar);
+  const double px_per_bar = static_cast<double>(width_px) / static_cast<double>(visible_bars);
+
+  ClearGreekPanelLines(sc, state.panel_line_numbers);
+
+  int drawn = 0;
+  int failed = 0;
+  for (const auto& level : levels_to_draw) {
+    const double length_px = panel_width_px * (level.greek / max_greek);
+    const double clamped_length_px = std::max(4.0, length_px);  // не даём линиям исчезнуть при очень малых значениях
+    const int length_bars = std::max(1, static_cast<int>(std::round(clamped_length_px / px_per_bar)));
+    const int offset_bars = std::max(0, static_cast<int>(std::round(panel_offset_px / px_per_bar)));
+    const int end_bar = std::max(left_bar, right_bar - offset_bars);
+    const int begin_bar = std::max(left_bar, end_bar - length_bars);
+
+    s_UseTool tool;
+    tool.Clear();
+    tool.ChartNumber = sc.ChartNumber;
+    tool.DrawingType = DRAWING_LINE;
+    tool.BeginValue = static_cast<float>(level.strike);
+    tool.EndValue = static_cast<float>(level.strike);
+    tool.BeginIndex = begin_bar;
+    tool.EndIndex = end_bar;
+    tool.Region = sc.GraphRegion;
+    tool.Color = line_color;
+    tool.LineWidth = static_cast<uint16_t>(line_width);
+    tool.LineStyle = LINESTYLE_SOLID;
+    tool.AddMethod = UTAM_ADD_OR_ADJUST;
+    tool.AddAsUserDrawnDrawing = 0;
+    tool.HideDrawing = 0;
+    tool.AllowSaveToChartbook = 1;
+    tool.UseRelativeVerticalValues = 0;  // абсолютные цены
+    tool.DrawUnderneathMainGraph = 0;
+    tool.ExtendLeft = 0;
+    tool.ExtendRight = 0;
+    tool.DrawWithinRegion = 1;
+
+    const int rc = sc.UseTool(tool);
+    if (rc > 0) {
+      state.panel_line_numbers.push_back(tool.LineNumber);
+      ++drawn;
+    } else {
+      ++failed;
+      if (debug_log) {
+        sc.AddMessageToLog("GexPanel: UseTool failed to draw line", 0);
+      }
+    }
+  }
+
+  state.last_visible_low = visible_low;
+  state.last_visible_high = visible_high;
+
+  if (debug_log) {
+    std::ostringstream dbg;
+    dbg << "GexPanel: drawn=" << drawn << " failed=" << failed << " max=" << max_greek
+        << " levels=" << levels_to_draw.size()
+        << " first=" << (levels_to_draw.empty() ? 0.0 : levels_to_draw.front().strike)
+        << " last=" << (levels_to_draw.empty() ? 0.0 : levels_to_draw.back().strike) << " region=" << sc.GraphRegion
+        << " width_px=" << panel_width_px << " offset_px=" << panel_offset_px
+        << " vis_px=" << width_px << " vis_bars=" << visible_bars;
+    sc.AddMessageToLog(dbg.str().c_str(), 0);
+  }
+}
+
+// Формирует список мини-контрактов в один столбец (сортировка по убыванию strike).
 std::string FormatMiniContractsColumns(const std::vector<GexState::MiniContract>& data) {
   if (data.empty()) return std::string("  (empty)");
-  constexpr size_t kRows = 25;
-  const size_t cols = (data.size() + kRows - 1) / kRows;
 
   std::vector<GexState::MiniContract> desc = data;
   std::sort(desc.begin(), desc.end(),
             [](const GexState::MiniContract& a, const GexState::MiniContract& b) { return a.strike > b.strike; });
 
   std::ostringstream out;
-  for (size_t row = 0; row < kRows; ++row) {
-    bool any = false;
-    for (size_t col = 0; col < cols; ++col) {
-      const size_t idx = row + col * kRows;
-      if (idx >= desc.size()) continue;
-      const auto& mc = desc[idx];
-      out << std::setw(3) << (idx + 1) << " strike=" << std::setw(8) << FormatDouble(mc.strike, 2)
-          << " greek=" << std::setw(8) << FormatDouble(mc.specified_greek, 2) << "   ";
-      any = true;
-    }
-    if (any) out << "\n";
+  for (size_t idx = 0; idx < desc.size(); ++idx) {
+    const auto& mc = desc[idx];
+    out << std::setw(3) << (idx + 1) << " strike=" << std::setw(8) << FormatDouble(mc.strike, 2)
+        << " greek=" << std::setw(10) << FormatDouble(mc.specified_greek, 2) << "\n";
   }
   return out.str();
 }
@@ -345,7 +593,8 @@ std::string FetchGexbotState(const std::string& ticker,
     if (!error_out.empty()) {
       return {};
     }
-    out << "\n\nMini Contracts (" << state_out.mini_contracts.size() << ", sorted desc by strike, columns of 25):\n";
+    out << "\n\nMini Contracts (" << state_out.mini_contracts.size()
+        << " with positive greek, single column, sorted desc by strike):\n";
     out << FormatMiniContractsColumns(state_out.mini_contracts);
 
     return out.str();
@@ -413,6 +662,13 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   SCInputRef apiKeyInput = sc.Input[0];
   SCInputRef greekInput = sc.Input[1];
   SCInputRef pollIntervalInput = sc.Input[2];
+  SCInputRef displayModeInput = sc.Input[3];
+  SCInputRef panelWidthInput = sc.Input[4];
+  SCInputRef panelOffsetInput = sc.Input[5];
+  SCInputRef lineColorInput = sc.Input[6];
+  SCInputRef lineWidthInput = sc.Input[7];
+  SCInputRef autoScaleInput = sc.Input[8];
+  SCInputRef debugInput = sc.Input[9];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - GexBot Poller";
@@ -438,6 +694,30 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     pollIntervalInput.SetFloat(static_cast<float>(kDefaultPollInterval));
     pollIntervalInput.SetFloatLimits(static_cast<float>(kMinPollInterval),
                                      static_cast<float>(kMaxPollInterval));
+
+    displayModeInput.Name = "Display Mode";
+    displayModeInput.SetCustomInputStrings("1=Positive Only;2=All Values (TBD)");
+    displayModeInput.SetCustomInputIndex(0);
+
+    panelWidthInput.Name = "Panel Width (px)";
+    panelWidthInput.SetInt(400);
+    panelWidthInput.SetIntLimits(10, 400);
+
+    panelOffsetInput.Name = "Panel Right Offset (px)";
+    panelOffsetInput.SetInt(10);
+    panelOffsetInput.SetIntLimits(0, 200);
+
+    lineColorInput.Name = "Line Color";
+    lineColorInput.SetColor(RGB(0, 255, 255));
+
+    lineWidthInput.Name = "Line Width";
+    lineWidthInput.SetInt(2);
+    lineWidthInput.SetIntLimits(1, 6);
+
+    autoScaleInput.Name = "Auto Scale";
+    autoScaleInput.SetYesNo(true);
+    debugInput.Name = "Show Debug Text";
+    debugInput.SetYesNo(true);
     return;
   }
 
@@ -485,4 +765,15 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
 
   static int line_number = 0;
   RenderStatusText(sc, line_number, state->last_text);
+
+  // Отрисовка панели уровней specified_greek.
+  const int display_mode = std::max<int>(1, displayModeInput.GetIndex() + 1);
+  const int panel_width_px = panelWidthInput.GetInt();
+  const int panel_offset_px = panelOffsetInput.GetInt();
+  const COLORREF line_color = lineColorInput.GetColor();
+  const int line_width = lineWidthInput.GetInt();
+  const bool auto_scale_on = autoScaleInput.GetYesNo();
+  const bool debug_log = debugInput.GetYesNo();
+  RenderGreekPanel(sc, *state, display_mode, panel_width_px, panel_offset_px, line_color, line_width,
+                   auto_scale_on, debug_log);
 }

@@ -10,6 +10,7 @@ SierraStudy — каркас для разработки и горячей за�
   - модели зон, flip и структуры StudyPlan (`plan.hpp`).
 - **Wrapper** (`projects/Wrapper/src`, `projects/Wrapper/include/sierra/acsil`) — динамическая библиотека-адаптер Sierra Chart ↔ Core:
   - `study.cpp` — опросчик GexBot: по символу графика маппит тикер (ES/MES→ES_SPX, NQ/MNQ→NQ_NDX), выполняет GET `https://api.gexbot.com/{TICKER}/state/{GREEK}?key=...` через libcurl, парсит JSON ответ RapidYAML и выводит текстом на графике;
+  - панель уровней specified_greek: в режиме *Positive Only* рисует горизонтальные линии на strike, длина пропорциональна значению greek (нормализация по максимуму в видимой шкале), правый край выровнен по правой части графика; режим *All Values (TBD)* подключён как безопасная заглушка;
   - Inputs: `GexBot API Key` (по умолчанию IZiEb6yDrgxE), `Greek` (delta_zero, gamma_zero, delta_one, gamma_one, charm_zero, vanna_zero, charm_one, vanna_one; дефолт **gamma_zero**), `Poll Interval (seconds)` (10–100, по умолчанию 30);
   - `supportFunction.cpp` содержит вспомогательные функции для логирования, конвертации времени, отрисовки линий, зон и подписей (в текущем цикле не вызываются).
 - **Tests** (`projects/Tests/unit`) — консольное приложение Google Test (из vcpkg), линкуется только с `Core.lib` и тестирует расчёт SMA, форматирование и парсер YAML, используя данные из `test_files/`.
