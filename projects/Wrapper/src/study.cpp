@@ -514,6 +514,7 @@ void RenderKeyLevel(SCStudyGraphRef sc,
                     int style,
                     bool draw_underneath,
                     int& line_number) {
+  (void)state;
   if (!enabled || std::isnan(price)) {
     if (line_number != 0) {
       sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line_number);
@@ -751,14 +752,15 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   SCInputRef lineColorInput = sc.Input[6];
   SCInputRef lineWidthInput = sc.Input[7];
   SCInputRef drawLayerInput = sc.Input[8];
-  SCInputRef shortGammaEnabledInput = sc.Input[9];
-  SCInputRef shortGammaColorInput = sc.Input[10];
-  SCInputRef shortGammaWidthInput = sc.Input[11];
-  SCInputRef shortGammaStyleInput = sc.Input[12];
-  SCInputRef longGammaEnabledInput = sc.Input[13];
-  SCInputRef longGammaColorInput = sc.Input[14];
-  SCInputRef longGammaWidthInput = sc.Input[15];
-  SCInputRef longGammaStyleInput = sc.Input[16];
+  SCInputRef diagnosticsInput = sc.Input[9];
+  SCInputRef shortGammaEnabledInput = sc.Input[10];
+  SCInputRef shortGammaColorInput = sc.Input[11];
+  SCInputRef shortGammaWidthInput = sc.Input[12];
+  SCInputRef shortGammaStyleInput = sc.Input[13];
+  SCInputRef longGammaEnabledInput = sc.Input[14];
+  SCInputRef longGammaColorInput = sc.Input[15];
+  SCInputRef longGammaWidthInput = sc.Input[16];
+  SCInputRef longGammaStyleInput = sc.Input[17];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - GexBot Poller";
@@ -807,6 +809,9 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     drawLayerInput.Name = "Draw Layer";
     drawLayerInput.SetCustomInputStrings("Background;Foreground");
     drawLayerInput.SetCustomInputIndex(0);  // Background по умолчанию
+
+    diagnosticsInput.Name = "Show Diagnostics";
+    diagnosticsInput.SetYesNo(false);
 
     shortGammaEnabledInput.Name = "Show Short Gamma";
     shortGammaEnabledInput.SetYesNo(true);
@@ -874,9 +879,6 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     state->last_text = "Waiting for GexBot data...";
   }
 
-  static int line_number = 0;
-  RenderStatusText(sc, line_number, state->last_text);
-
   // Отрисовка панели уровней specified_greek.
   const int display_mode = std::max<int>(1, displayModeInput.GetIndex() + 1);
   const int panel_width_px = panelWidthInput.GetInt();
@@ -885,6 +887,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   const int line_width = lineWidthInput.GetInt();
   const int draw_layer_index = drawLayerInput.GetIndex();
   const bool draw_underneath = (draw_layer_index == 0);  // Background -> under graph
+  const bool show_diagnostics = diagnosticsInput.GetYesNo();
   const bool show_short_gamma = shortGammaEnabledInput.GetYesNo();
   const COLORREF short_gamma_color = shortGammaColorInput.GetColor();
   const int short_gamma_width = shortGammaWidthInput.GetInt();
@@ -904,4 +907,13 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
                  short_gamma_width, short_gamma_style, draw_underneath, state->line_major_short);
   RenderKeyLevel(sc, *state, show_long_gamma, state->key_levels.major_long_gamma, long_gamma_color, long_gamma_width,
                  long_gamma_style, draw_underneath, state->line_major_long);
+
+  // Диагностический текст
+  static int line_number = 0;
+  if (show_diagnostics) {
+    RenderStatusText(sc, line_number, state->last_text);
+  } else if (line_number != 0) {
+    sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line_number);
+    line_number = 0;
+  }
 }
