@@ -50,6 +50,8 @@ struct GexState {
   double last_visible_low = std::numeric_limits<double>::quiet_NaN();
   double last_visible_high = std::numeric_limits<double>::quiet_NaN();
   std::vector<int> panel_line_numbers;
+  int line_major_long = 0;
+  int line_major_short = 0;
 };
 
 /**
@@ -300,6 +302,24 @@ std::vector<GreekPanelLevel> BuildVisiblePositiveLevels(const std::vector<GexSta
 }
 
 /**
+ * @brief Преобразует индекс выбора стиля в ACSIL LineStyle.
+ * @param style_index 0=Solid, 1=Dashed, 2=Dotted, 3=DashDot.
+ * @return Константа LINESTYLE_* для UseTool.
+ */
+int ToLineStyle(int style_index) {
+  switch (style_index) {
+    case 1:
+      return LINESTYLE_DASH;
+    case 2:
+      return LINESTYLE_DOT;
+    case 3:
+      return LINESTYLE_DASHDOT;
+    default:
+      return LINESTYLE_SOLID;
+  }
+}
+
+/**
  * @brief Вычисляет количество баров, соответствующее заданной длине в пикселях.
  * @param sc Контекст Sierra Chart.
  * @param length_px Требуемая длина в пикселях.
@@ -344,6 +364,7 @@ void RenderGreekPanel(SCStudyGraphRef sc,
                       COLORREF line_color,
                       int line_width,
                       bool auto_scale_on,
+                      bool draw_underneath,
                       bool debug_log) {
   // Заглушка для Mode 2 — просто очищаем старые линии.
   if (display_mode == 2) {
@@ -440,7 +461,7 @@ void RenderGreekPanel(SCStudyGraphRef sc,
     tool.HideDrawing = 0;
     tool.AllowSaveToChartbook = 1;
     tool.UseRelativeVerticalValues = 0;  // абсолютные цены
-    tool.DrawUnderneathMainGraph = 0;
+    tool.DrawUnderneathMainGraph = draw_underneath ? 1 : 0;
     tool.ExtendLeft = 0;
     tool.ExtendRight = 0;
     tool.DrawWithinRegion = 1;
@@ -470,6 +491,68 @@ void RenderGreekPanel(SCStudyGraphRef sc,
         << " vis_px=" << width_px << " vis_bars=" << visible_bars;
     sc.AddMessageToLog(dbg.str().c_str(), 0);
   }
+}
+
+/**
+ * @brief Рисует горизонтальные ключевые уровни major_long_gamma / major_short_gamma.
+ * @param sc Контекст ACSIL.
+ * @param state Persistent-состояние.
+ * @param enabled Включить/выключить линию.
+ * @param price Цена уровня.
+ * @param color Цвет линии.
+ * @param width Толщина линии.
+ * @param style Индекс стиля (0=Solid,1=Dash,2=Dot,3=DashDot).
+ * @param draw_underneath true — под графиком; false — над графиком.
+ * @param line_number Сохранённый номер линии для переиспользования.
+ */
+void RenderKeyLevel(SCStudyGraphRef sc,
+                    GexState& state,
+                    bool enabled,
+                    double price,
+                    COLORREF color,
+                    int width,
+                    int style,
+                    bool draw_underneath,
+                    int& line_number) {
+  if (!enabled || std::isnan(price)) {
+    if (line_number != 0) {
+      sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, line_number);
+      line_number = 0;
+    }
+    return;
+  }
+
+  const int left_bar = sc.IndexOfFirstVisibleBar;
+  const int right_bar = sc.IndexOfLastVisibleBar;
+  if (left_bar < 0 || right_bar < 0) {
+    return;
+  }
+
+  s_UseTool tool;
+  tool.Clear();
+  tool.ChartNumber = sc.ChartNumber;
+  tool.DrawingType = DRAWING_HORIZONTALLINE;
+  tool.BeginValue = static_cast<float>(price);
+  tool.EndValue = tool.BeginValue;
+  tool.BeginIndex = left_bar;
+  tool.EndIndex = right_bar;
+  tool.Region = sc.GraphRegion;
+  tool.Color = color;
+  tool.LineWidth = static_cast<uint16_t>(std::max(1, width));
+  tool.LineStyle = static_cast<SubgraphLineStyles>(ToLineStyle(style));
+  tool.AddMethod = UTAM_ADD_OR_ADJUST;
+  tool.AddAsUserDrawnDrawing = 0;
+  tool.DrawUnderneathMainGraph = draw_underneath ? 1 : 0;
+  tool.UseRelativeVerticalValues = 0;
+  tool.AllowSaveToChartbook = 1;
+  tool.HideDrawing = 0;
+  tool.ExtendLeft = 1;
+  tool.ExtendRight = 1;
+  if (line_number != 0) {
+    tool.LineNumber = line_number;
+  }
+  sc.UseTool(tool);
+  line_number = tool.LineNumber;
 }
 
 // Формирует список мини-контрактов в один столбец (сортировка по убыванию strike).
@@ -667,8 +750,15 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   SCInputRef panelOffsetInput = sc.Input[5];
   SCInputRef lineColorInput = sc.Input[6];
   SCInputRef lineWidthInput = sc.Input[7];
-  SCInputRef autoScaleInput = sc.Input[8];
-  SCInputRef debugInput = sc.Input[9];
+  SCInputRef drawLayerInput = sc.Input[8];
+  SCInputRef shortGammaEnabledInput = sc.Input[9];
+  SCInputRef shortGammaColorInput = sc.Input[10];
+  SCInputRef shortGammaWidthInput = sc.Input[11];
+  SCInputRef shortGammaStyleInput = sc.Input[12];
+  SCInputRef longGammaEnabledInput = sc.Input[13];
+  SCInputRef longGammaColorInput = sc.Input[14];
+  SCInputRef longGammaWidthInput = sc.Input[15];
+  SCInputRef longGammaStyleInput = sc.Input[16];
 
   if (sc.SetDefaults) {
     sc.GraphName = "SierraStudy - GexBot Poller";
@@ -696,7 +786,7 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
                                      static_cast<float>(kMaxPollInterval));
 
     displayModeInput.Name = "Display Mode";
-    displayModeInput.SetCustomInputStrings("1=Positive Only;2=All Values (TBD)");
+    displayModeInput.SetCustomInputStrings("Positive Only;Negative & Positive");
     displayModeInput.SetCustomInputIndex(0);
 
     panelWidthInput.Name = "Panel Width (px)";
@@ -711,13 +801,34 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
     lineColorInput.SetColor(RGB(0, 255, 255));
 
     lineWidthInput.Name = "Line Width";
-    lineWidthInput.SetInt(2);
+    lineWidthInput.SetInt(1);
     lineWidthInput.SetIntLimits(1, 6);
 
-    autoScaleInput.Name = "Auto Scale";
-    autoScaleInput.SetYesNo(true);
-    debugInput.Name = "Show Debug Text";
-    debugInput.SetYesNo(true);
+    drawLayerInput.Name = "Draw Layer";
+    drawLayerInput.SetCustomInputStrings("Background;Foreground");
+    drawLayerInput.SetCustomInputIndex(0);  // Background по умолчанию
+
+    shortGammaEnabledInput.Name = "Show Short Gamma";
+    shortGammaEnabledInput.SetYesNo(true);
+    shortGammaColorInput.Name = "Short Gamma Color";
+    shortGammaColorInput.SetColor(RGB(165, 105, 220));  // фиолетовый из макета
+    shortGammaWidthInput.Name = "Short Gamma Width";
+    shortGammaWidthInput.SetInt(1);
+    shortGammaWidthInput.SetIntLimits(1, 6);
+    shortGammaStyleInput.Name = "Short Gamma Style";
+    shortGammaStyleInput.SetCustomInputStrings("Solid;Dashed;Dotted;Dash-Dot");
+    shortGammaStyleInput.SetCustomInputIndex(1);  // dashed
+
+    longGammaEnabledInput.Name = "Show Long Gamma";
+    longGammaEnabledInput.SetYesNo(true);
+    longGammaColorInput.Name = "Long Gamma Color";
+    longGammaColorInput.SetColor(RGB(0, 200, 200));  // бирюзовый из макета
+    longGammaWidthInput.Name = "Long Gamma Width";
+    longGammaWidthInput.SetInt(1);
+    longGammaWidthInput.SetIntLimits(1, 6);
+    longGammaStyleInput.Name = "Long Gamma Style";
+    longGammaStyleInput.SetCustomInputStrings("Solid;Dashed;Dotted;Dash-Dot");
+    longGammaStyleInput.SetCustomInputIndex(1);  // dashed
     return;
   }
 
@@ -772,8 +883,25 @@ SCSFExport scsf_SierraStudyMovingAverage(SCStudyGraphRef sc) {
   const int panel_offset_px = panelOffsetInput.GetInt();
   const COLORREF line_color = lineColorInput.GetColor();
   const int line_width = lineWidthInput.GetInt();
-  const bool auto_scale_on = autoScaleInput.GetYesNo();
-  const bool debug_log = debugInput.GetYesNo();
-  RenderGreekPanel(sc, *state, display_mode, panel_width_px, panel_offset_px, line_color, line_width,
-                   auto_scale_on, debug_log);
+  const int draw_layer_index = drawLayerInput.GetIndex();
+  const bool draw_underneath = (draw_layer_index == 0);  // Background -> under graph
+  const bool show_short_gamma = shortGammaEnabledInput.GetYesNo();
+  const COLORREF short_gamma_color = shortGammaColorInput.GetColor();
+  const int short_gamma_width = shortGammaWidthInput.GetInt();
+  const int short_gamma_style = shortGammaStyleInput.GetIndex();
+
+  const bool show_long_gamma = longGammaEnabledInput.GetYesNo();
+  const COLORREF long_gamma_color = longGammaColorInput.GetColor();
+  const int long_gamma_width = longGammaWidthInput.GetInt();
+  const int long_gamma_style = longGammaStyleInput.GetIndex();
+  const bool auto_scale_on = true;  // всегда включено
+  const bool debug_log = false;     // логи отключены
+  RenderGreekPanel(sc, *state, display_mode, panel_width_px, panel_offset_px, line_color, line_width, auto_scale_on,
+                   draw_underneath, debug_log);
+
+  // Ключевые уровни gamma
+  RenderKeyLevel(sc, *state, show_short_gamma, state->key_levels.major_short_gamma, short_gamma_color,
+                 short_gamma_width, short_gamma_style, draw_underneath, state->line_major_short);
+  RenderKeyLevel(sc, *state, show_long_gamma, state->key_levels.major_long_gamma, long_gamma_color, long_gamma_width,
+                 long_gamma_style, draw_underneath, state->line_major_long);
 }
