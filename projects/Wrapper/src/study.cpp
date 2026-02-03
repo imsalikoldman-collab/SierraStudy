@@ -6,10 +6,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <string>
-#include <iomanip>
 #include <vector>
 
 /// \brief Пользовательские исследования Sierra Chart <Add Custom Study>.
@@ -131,68 +132,84 @@ std::string FormatDouble(double v, int precision = 4) {
   return oss.str();
 }
 
-double ExtractDouble(const std::string& body, const char* key) {
-  const char* pos = std::strstr(body.c_str(), key);
-  if (!pos) return std::numeric_limits<double>::quiet_NaN();
-  pos = std::strchr(pos, ':');
-  if (!pos) return std::numeric_limits<double>::quiet_NaN();
-  // move past ':' and whitespace
-  ++pos;
-  while (*pos == ' ' || *pos == '\t') ++pos;
-  try {
-    return std::stod(pos);
-  } catch (...) {
-    return std::numeric_limits<double>::quiet_NaN();
+/**
+ * @brief Безопасно извлекает число с плавающей точкой из узла RapidYAML.
+ * @param node Узел-скаляр JSON/YAML, содержащий число.
+ * @param out Указатель для записи результата.
+ * @return true если парсинг прошёл успешно, иначе false.
+ * @note Возвращает false для пустых, null-значений и нечисловых скаляров.
+ * @warning Не бросает исключения — проверяйте возвращаемое значение.
+ */
+bool TryParseDouble(ryml::ConstNodeRef node, double* out) {
+  if (!node.readable() || !node.has_val() || node.val_is_null()) {
+    return false;
   }
+
+  double value{};
+  if (!c4::from_chars(node.val(), &value)) {
+    return false;
+  }
+
+  *out = value;
+  return true;
 }
 
-std::vector<GexState::MiniContract> ParseMiniContracts(const std::string& body) {
-  std::vector<GexState::MiniContract> result;
-  const std::string key = "\"mini_contracts\"";
-  size_t start = body.find(key);
-  if (start == std::string::npos) return result;
-  start = body.find('[', start);
-  if (start == std::string::npos) return result;
-  int depth = 0;
-  for (size_t i = start; i < body.size(); ++i) {
-    char c = body[i];
-    if (c == '[') depth++;
-    else if (c == ']') depth--;
-    if (depth == 0 && i > start) { // end of outer array
-      break;
-    }
-    // detect inner array start
-    if (depth == 2 && body[i] == '[') {
-      // parse inner array elements
-      size_t j = i + 1;
-      auto read_number = [&](size_t& idx) -> double {
-        while (idx < body.size() && (body[idx] == ' ' || body[idx] == '\t')) ++idx;
-        size_t end = idx;
-        while (end < body.size() && (std::isdigit(static_cast<unsigned char>(body[end])) ||
-                                     body[end] == '.' || body[end] == '-' || body[end] == '+' ||
-                                     body[end] == 'e' || body[end] == 'E')) {
-          ++end;
-        }
-        if (end == idx) return std::numeric_limits<double>::quiet_NaN();
-        double v = std::numeric_limits<double>::quiet_NaN();
-        try { v = std::stod(body.substr(idx, end - idx)); } catch (...) {}
-        idx = end;
-        return v;
-      };
-      GexState::MiniContract mc;
-      // element0: strike
-      mc.strike = read_number(j);
-      // skip element1, element2
-      for (int skip = 0; skip < 2; ++skip) {
-        j = body.find_first_of(",]", j);
-        if (j == std::string::npos) break;
-        ++j;
-      }
-      // element3: specified_greek
-      mc.specified_greek = read_number(j);
-      result.push_back(mc);
-    }
+/**
+ * @brief Читает необязательное числовое поле из JSON-объекта.
+ * @param parent Родительский узел (классический объект JSON).
+ * @param key Имя искомого поля.
+ * @return Значение double или NaN, если поле отсутствует либо не число.
+ * @note Упрощает обработку необязательных ключей API без выброса исключений.
+ * @warning Не различает отсутствующее поле и некорректное число — в обоих случаях возвращает NaN.
+ */
+double ReadOptionalDouble(const ryml::ConstNodeRef& parent, const char* key) {
+  double value{};
+  const auto node = parent.find_child(key);
+  if (TryParseDouble(node, &value)) {
+    return value;
   }
+  return std::numeric_limits<double>::quiet_NaN();
+}
+
+/**
+ * @brief Парсит массив mini_contracts из JSON-ответа GexBot через RapidYAML.
+ * @param root Корневой узел JSON-документа.
+ * @param error_out Строка для диагностики; заполняется при критической ошибке структуры.
+ * @return Отсортированный по strike вектор mini_contracts.
+ * @note Отсутствующие или частично некорректные элементы пропускаются, чтобы не прерывать опрос.
+ * @warning При полностью неверной структуре блока возвращается пустой вектор и сообщение об ошибке.
+ */
+std::vector<GexState::MiniContract> ParseMiniContracts(const ryml::ConstNodeRef& root,
+                                                       std::string& error_out) {
+  std::vector<GexState::MiniContract> result;
+
+  const auto node = root.find_child("mini_contracts");
+  if (!node.readable()) {
+    return result;  // поле необязательно, просто вернём пустой список
+  }
+
+  if (!node.is_seq()) {
+    error_out = "parse error: mini_contracts must be array";
+    return {};
+  }
+
+  for (const auto& child : node.children()) {
+    if (!child.is_seq() || child.num_children() < 4u) {
+      continue;  // пропускаем некорректный элемент, не рвём весь запрос
+    }
+
+    double strike{};
+    double greek{};
+    if (!TryParseDouble(child.child(0), &strike)) {
+      continue;
+    }
+    if (!TryParseDouble(child.child(3), &greek)) {
+      continue;
+    }
+
+    result.push_back(GexState::MiniContract{strike, greek});
+  }
+
   std::sort(result.begin(), result.end(),
             [](const GexState::MiniContract& a, const GexState::MiniContract& b) { return a.strike < b.strike; });
   return result;
@@ -296,6 +313,13 @@ std::string FetchGexbotState(const std::string& ticker,
     state_out.key_levels = {};
     state_out.mini_contracts.clear();
 
+    ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(response));
+    const auto root = tree.rootref();
+    if (!root.is_map()) {
+      error_out = "parse error: root JSON is not an object";
+      return {};
+    }
+
     std::ostringstream out;
 
     out << "Request: " << request_url;
@@ -303,10 +327,10 @@ std::string FetchGexbotState(const std::string& ticker,
 
     // Key levels (short and clear)
     out << "\n\nKey Levels:";
-    state_out.key_levels.major_positive = ExtractDouble(response, "\"major_positive\"");
-    state_out.key_levels.major_negative = ExtractDouble(response, "\"major_negative\"");
-    state_out.key_levels.major_long_gamma = ExtractDouble(response, "\"major_long_gamma\"");
-    state_out.key_levels.major_short_gamma = ExtractDouble(response, "\"major_short_gamma\"");
+    state_out.key_levels.major_positive = ReadOptionalDouble(root, "major_positive");
+    state_out.key_levels.major_negative = ReadOptionalDouble(root, "major_negative");
+    state_out.key_levels.major_long_gamma = ReadOptionalDouble(root, "major_long_gamma");
+    state_out.key_levels.major_short_gamma = ReadOptionalDouble(root, "major_short_gamma");
     if (!std::isnan(state_out.key_levels.major_positive))
       out << "\n  major_positive: " << FormatDouble(state_out.key_levels.major_positive, 2);
     if (!std::isnan(state_out.key_levels.major_negative))
@@ -317,7 +341,10 @@ std::string FetchGexbotState(const std::string& ticker,
       out << "\n  major_short_gamma: " << FormatDouble(state_out.key_levels.major_short_gamma, 2);
 
     // Mini contracts: show all, columns of 25 rows, sorted by strike desc
-    state_out.mini_contracts = ParseMiniContracts(response);
+    state_out.mini_contracts = ParseMiniContracts(root, error_out);
+    if (!error_out.empty()) {
+      return {};
+    }
     out << "\n\nMini Contracts (" << state_out.mini_contracts.size() << ", sorted desc by strike, columns of 25):\n";
     out << FormatMiniContractsColumns(state_out.mini_contracts);
 
